@@ -3,6 +3,7 @@ import 'package:theme/theme.dart';
 
 import '../events/events_store.dart';
 import '../events/gesture.dart';
+import 'test_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.store});
@@ -67,6 +68,21 @@ class SettingsScreen extends StatelessWidget {
                         if (context.mounted && added) context.showToast('Tile added.', status: UiStatus.success);
                       },
                     ),
+                ],
+              ),
+              UiListGroup(
+                header: 'Gestures',
+                footer: 'See a live motion meter, and teach Flick how hard you chop and twist.',
+                children: [
+                  UiListTile(
+                    'Test gestures',
+                    subtitle: 'Live meter and training',
+                    icon: Icons.speed_rounded,
+                    chevron: true,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => TestScreen(store: store)),
+                    ),
+                  ),
                 ],
               ),
               UiListGroup(

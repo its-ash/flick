@@ -15,6 +15,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
@@ -27,15 +28,21 @@ import io.flutter.plugin.common.MethodChannel
  *   - openPermission({name}): "notifications" | "overlay" | "dnd" | "battery".
  *   - tryAction({action}): runs an action now, for the "Try" buttons.
  *   - addTile() -> asks Android 13+ to add the Quick Settings tile.
+ *   - startTraining({gesture}) / stopTraining() / resetTraining({gesture}): personal strength
+ *     (only meaningful while the probe stream below is listened to).
+ * EventChannel "com.itsash.flick/probe": live motion levels for the Test gestures screen (GestureProbe).
  */
 class MainActivity : FlutterActivity() {
 
     private val channelName = "com.itsash.flick/control"
     private var runner: ActionRunner? = null
+    private var probe: GestureProbe? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val prefs = EventsPrefs(this)
+        val probe = GestureProbe(applicationContext).also { this.probe = it }
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "com.itsash.flick/probe").setStreamHandler(probe)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
@@ -75,6 +82,19 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(null)
                     }
+                    "startTraining" -> {
+                        Gesture.of(call.argument<String>("gesture"))?.let { probe.startTraining(it) }
+                        result.success(null)
+                    }
+                    "stopTraining" -> {
+                        probe.stopTraining()
+                        result.success(null)
+                    }
+                    "resetTraining" -> {
+                        Gesture.of(call.argument<String>("gesture"))?.let { prefs.setCalibration(it, null) }
+                        probe.stopTraining() // re-applies thresholds
+                        result.success(null)
+                    }
                     "addTile" -> addTile(result)
                     else -> result.notImplemented()
                 }
@@ -85,6 +105,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        probe?.stop()
+        probe = null
         runner?.release()
         runner = null
         super.onDestroy()

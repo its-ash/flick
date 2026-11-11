@@ -19,6 +19,7 @@ class EventsConfig {
     required this.vibrate,
     required this.sensitivity,
     required this.gestures,
+    this.trained = const {},
   });
 
   factory EventsConfig.fromMap(Map<Object?, Object?> map) {
@@ -29,6 +30,10 @@ class EventsConfig {
       screenOff: map['screenOff'] as bool? ?? true,
       vibrate: map['vibrate'] as bool? ?? true,
       sensitivity: map['sensitivity'] as String? ?? 'normal',
+      trained: {
+        for (final e in ((map['trained'] as Map<Object?, Object?>?) ?? const {}).entries)
+          if (e.value == true) e.key as String,
+      },
       gestures: {
         for (final kind in GestureKind.values)
           kind: GestureSetting(
@@ -45,6 +50,9 @@ class EventsConfig {
   final bool vibrate;
   final String sensitivity;
   final Map<GestureKind, GestureSetting> gestures;
+
+  /// Keys of gestures (chop, twist) that have a personal trained strength.
+  final Set<String> trained;
 
   /// Actions used by the enabled gestures (flip counts as Do Not Disturb).
   Set<GestureAction> get usedActions => {
@@ -91,6 +99,19 @@ class EventsPlatform {
   Future<void> openPermission(String name) => _channel.invokeMethod('openPermission', {'name': name});
 
   Future<void> tryAction(GestureAction a) => _channel.invokeMethod('tryAction', {'action': a.key});
+
+  Future<void> startTraining(String gesture) => _channel.invokeMethod('startTraining', {'gesture': gesture});
+
+  Future<void> stopTraining() => _channel.invokeMethod('stopTraining');
+
+  Future<void> resetTraining(String gesture) => _channel.invokeMethod('resetTraining', {'gesture': gesture});
+
+  /// Live motion levels and detected gestures while the Test screen is open.
+  /// Listening pauses the real actions; cancelling resumes them.
+  Stream<Map<Object?, Object?>> probe() =>
+      _probe.receiveBroadcastStream().map((e) => e as Map<Object?, Object?>);
+
+  static const _probe = EventChannel('com.itsash.flick/probe');
 
   Future<bool> addTile() async => await _channel.invokeMethod<bool>('addTile') ?? false;
 }

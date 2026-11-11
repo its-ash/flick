@@ -62,6 +62,13 @@ class EventsPrefs(context: Context) {
             else -> 1f
         }
 
+    /** Trained trigger strength for [g] (chop: m/s², twist: rad/s), or null when not trained. */
+    fun calibration(g: Gesture): Float? = prefs.getFloat("calib.${g.key}", 0f).takeIf { it > 0f }
+
+    fun setCalibration(g: Gesture, value: Float?) {
+        prefs.edit().apply { if (value == null) remove("calib.${g.key}") else putFloat("calib.${g.key}", value) }.apply()
+    }
+
     fun isEnabled(g: Gesture): Boolean = prefs.getBoolean("gesture.${g.key}.enabled", g.defaultEnabled)
 
     fun actionOf(g: Gesture): Action =
@@ -87,6 +94,10 @@ class EventsPrefs(context: Context) {
         "gestures" to Gesture.entries.associate {
             it.key to mapOf("enabled" to isEnabled(it), "action" to actionOf(it).key)
         },
+        "trained" to mapOf(
+            Gesture.CHOP.key to (calibration(Gesture.CHOP) != null),
+            Gesture.TWIST.key to (calibration(Gesture.TWIST) != null),
+        ),
     )
 
     companion object {

@@ -10,15 +10,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.service.quicksettings.TileService
 
 /**
@@ -26,30 +20,36 @@ import android.service.quicksettings.TileService
  * the configured action when a gesture is detected. Started from the app, the
  * Quick Settings tile and on boot; it reconfigures itself when settings change.
  */
-class EventsService : Service(), SensorEventListener, SharedPreferences.OnSharedPreferenceChangeListener {
+class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListener {
 
     private lateinit var prefs: EventsPrefs
-    private lateinit var sensors: SensorManager
     private lateinit var power: PowerManager
     private lateinit var runner: ActionRunner
     private var wakeLock: PowerManager.WakeLock? = null
 
-    private val gravity = GravityFilter()
-    private var chop = ChopDetector()
-    private var twist = TwistDetector()
-    private var pickup = PickupDetector()
-    private val wave = WaveDetector()
-    private val flip = FlipDetector()
-    private var proximityRange = 5f
+    private lateinit var engine: GestureEngine
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         prefs = EventsPrefs(this)
-        sensors = getSystemService(SensorManager::class.java)
         power = getSystemService(PowerManager::class.java)
         runner = ActionRunner(this)
+        engine = GestureEngine(this, prefs, object : GestureEngine.Listener {
+            override fun onGesture(gesture: Gesture) = handle(gesture)
+
+            override fun onFlip(event: FlipDetector.Event) {
+                if (paused) return
+                when (event) {
+                    FlipDetector.Event.FACE_DOWN -> {
+                        buzz(Gesture.FLIP)
+                        runner.dndForFaceDown(prefs)
+                    }
+                    FlipDetector.Event.FACE_UP -> runner.dndForFaceUp(prefs)
+                }
+            }
+        })
         startInForeground()
         prefs.prefs.registerOnSharedPreferenceChangeListener(this)
         configure()
@@ -68,7 +68,7 @@ class EventsService : Service(), SensorEventListener, SharedPreferences.OnShared
     override fun onDestroy() {
         running = false
         prefs.prefs.unregisterOnSharedPreferenceChangeListener(this)
-        sensors.unregisterListener(this)
+        engine.stop()
         wakeLock?.takeIf { it.isHeld }?.release()
         runner.release()
         refreshTile()
@@ -84,32 +84,9 @@ class EventsService : Service(), SensorEventListener, SharedPreferences.OnShared
         configure()
     }
 
-    /** (Re)registers only the sensors the enabled gestures need. */
+    /** Applies settings; the engine re-registers sensors only when the needed set changed. */
     private fun configure() {
-        sensors.unregisterListener(this)
-        val scale = prefs.scale
-        chop = ChopDetector(scale)
-        twist = TwistDetector(scale)
-        pickup = PickupDetector(scale)
-
-        val needAccel = prefs.isEnabled(Gesture.CHOP) || prefs.isEnabled(Gesture.PICKUP) || prefs.isEnabled(Gesture.FLIP)
-        if (needAccel) {
-            sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
-                sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-            }
-        }
-        if (prefs.isEnabled(Gesture.TWIST)) {
-            sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let {
-                sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-            }
-        }
-        if (prefs.isEnabled(Gesture.WAVE)) {
-            // The wake-up variant keeps working while the CPU sleeps.
-            (sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY, true) ?: sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY))?.let {
-                proximityRange = it.maximumRange
-                sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
-            }
-        }
+        engine.configure(Gesture.entries.filter { prefs.isEnabled(it) }.toSet())
 
         // Non-wake-up sensors stop reporting when the CPU sleeps with the screen off.
         if (prefs.screenOff) {
@@ -124,48 +101,15 @@ class EventsService : Service(), SensorEventListener, SharedPreferences.OnShared
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-
-    override fun onSensorChanged(event: SensorEvent) {
-        val t = event.timestamp
-        when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER -> {
-                gravity.update(event.values[0], event.values[1], event.values[2])
-                val g = gravity.gravity
-                if (prefs.isEnabled(Gesture.CHOP) && chop.add(t, gravity.linearMagnitude())) fire(Gesture.CHOP)
-                if (prefs.isEnabled(Gesture.PICKUP) && pickup.add(t, g[0], g[1], g[2]) && !power.isInteractive) {
-                    fire(Gesture.PICKUP)
-                }
-                if (prefs.isEnabled(Gesture.FLIP)) {
-                    when (flip.add(t, g[2])) {
-                        FlipDetector.Event.FACE_DOWN -> {
-                            buzz()
-                            runner.dndForFaceDown(prefs)
-                        }
-                        FlipDetector.Event.FACE_UP -> runner.dndForFaceUp(prefs)
-                        null -> Unit
-                    }
-                }
-            }
-            Sensor.TYPE_GYROSCOPE -> {
-                if (twist.add(t, event.values[1])) fire(Gesture.TWIST)
-            }
-            Sensor.TYPE_PROXIMITY -> {
-                val near = event.values[0] < proximityRange
-                if (wave.add(t, near) && !power.isInteractive) fire(Gesture.WAVE)
-            }
-        }
-    }
-
-    private fun fire(gesture: Gesture) {
-        buzz()
+    private fun handle(gesture: Gesture) {
+        if (paused) return // the test / train screen is open
+        if ((gesture == Gesture.PICKUP || gesture == Gesture.WAVE) && power.isInteractive) return
+        buzz(gesture)
         runner.run(prefs.actionOf(gesture))
     }
 
-    private fun buzz() {
-        if (!prefs.vibrate) return
-        getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
-    }
+    /** Own-pattern vibration; the engine also mutes chop / twist while it runs. */
+    private fun buzz(gesture: Gesture) = engine.buzz(gesture, prefs.vibrate)
 
     private fun startInForeground() {
         val nm = getSystemService(NotificationManager::class.java)
@@ -207,6 +151,10 @@ class EventsService : Service(), SensorEventListener, SharedPreferences.OnShared
         @Volatile
         var running = false
             private set
+
+        /** True while the test / train screen is open: gestures are detected there, not acted on. */
+        @Volatile
+        var paused = false
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, EventsService::class.java))

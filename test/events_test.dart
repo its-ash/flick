@@ -29,6 +29,15 @@ void main() {
     expect(c.usedActions, {GestureAction.wake, GestureAction.flashlight, GestureAction.camera});
   });
 
+  test('trained gestures are parsed', () {
+    expect(EventsConfig.fromMap(configMap()).trained, isEmpty);
+    final c = EventsConfig.fromMap({
+      ...configMap(),
+      'trained': {'chop': true, 'twist': false},
+    });
+    expect(c.trained, {'chop'});
+  });
+
   test('flip counts as Do Not Disturb', () {
     final c = EventsConfig.fromMap(configMap(gestures: {'flip': {'enabled': true, 'action': 'wake'}}));
     expect(c.usedActions, contains(GestureAction.dnd));
