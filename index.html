@@ -1,0 +1,332 @@
+<!doctype html>
+<!--
+  Ash Store landing page template. Canonical copy: ash-store/store-kit/landing.html.
+  Copy it to an app repo root as index.html. It reads ./store.json and the
+  latest GitHub release at load time, so it needs no edits per app.
+  With "catalog": true in store.json it also lists every Ash Store app.
+  Light theme in the style of an app store listing page.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#ffffff">
+<title>Ash Store app</title>
+<meta name="description" content="">
+<link rel="icon" href="">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #ffffff; --surface: #f8f9fa; --text: #202124; --muted: #5f6368; --subtle: #80868b;
+    --border: #dadce0; --divider: #e8eaed;
+    --green: #01875f; --green-hover: #056449; --green-soft: #e6f3ef; --on-green: #ffffff;
+    --chip: #f1f3f4;
+    --shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: light; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 Roboto, "Google Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+  a { color: var(--green); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1024px; margin: 0 auto; padding: 0 24px; }
+
+  /* Top bar */
+  .topbar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--divider); }
+  .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 20px; font-weight: 400; }
+  .brand:hover { text-decoration: none; }
+  .brand .logo { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #34a853 0%, #01875f 50%, #1a73e8 100%); color: #fff; font-weight: 700; font-size: 16px; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs a { color: var(--muted); font-weight: 500; padding: 8px 14px; border-radius: 20px; }
+  .tabs a:hover { background: var(--chip); text-decoration: none; }
+
+  /* App header */
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 32px; padding: 40px 0 8px; align-items: start; }
+  h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 500; line-height: 1.1; margin: 0 0 12px; letter-spacing: 0; }
+  .dev { font-size: 16px; font-weight: 500; }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .hero img.icon { width: 240px; height: 240px; border-radius: 48px; box-shadow: var(--shadow); background: var(--surface); object-fit: cover; }
+  .hero .icon-sm { display: none; }
+
+  .stats { display: flex; align-items: center; margin: 28px 0 0; padding: 0; list-style: none; }
+  .stats li { padding: 0 24px; text-align: center; position: relative; min-width: 84px; }
+  .stats li:first-child { padding-left: 0; }
+  .stats li + li::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); height: 24px; border-left: 1px solid var(--divider); }
+  .stats .v { font-weight: 500; font-size: 14px; color: var(--text); white-space: nowrap; }
+  .stats .l { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 28px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 28px; border-radius: 8px;
+    font-weight: 500; font-size: 14px; border: 1px solid var(--border); background: var(--bg); color: var(--green); }
+  .btn:hover { text-decoration: none; background: var(--green-soft); }
+  .btn.install { background: var(--green); color: var(--on-green); border-color: var(--green); min-width: 200px; }
+  .btn.install:hover { background: var(--green-hover); }
+  .btn svg { width: 20px; height: 20px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 16px; display: flex; align-items: center; gap: 6px; }
+  .note svg { width: 16px; height: 16px; flex: none; }
+
+  /* Body sections */
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; padding: 32px 0 0; }
+  section { margin: 0 0 40px; }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  h2 { font-size: 22px; font-weight: 500; margin: 0; }
+  .sec-head a.arrow { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+  .sec-head a.arrow:hover { background: var(--chip); }
+  .sec-head a.arrow svg { width: 22px; height: 22px; }
+  .desc { white-space: pre-line; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  .updated { margin-top: 20px; }
+  .updated .l { font-weight: 500; color: var(--text); }
+  .updated .v { color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .chip { display: inline-flex; align-items: center; height: 32px; padding: 0 16px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-weight: 500; font-size: 14px; }
+
+  .safety { border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .safety .row { display: flex; gap: 16px; align-items: flex-start; padding: 8px 0; }
+  .safety .row svg { width: 22px; height: 22px; color: var(--muted); flex: none; margin-top: 1px; }
+  .safety .t { color: var(--text); }
+  .safety .s { color: var(--muted); font-size: 12px; }
+
+  ol.steps { margin: 0; padding-left: 20px; color: var(--muted); }
+  ol.steps li { margin: 8px 0; padding-left: 4px; }
+  .whatsnew { color: var(--muted); white-space: pre-line; max-height: 12em; overflow: hidden; }
+
+  /* Sidebar */
+  aside h3 { font-size: 18px; font-weight: 500; margin: 0 0 16px; }
+  .side-links a { display: flex; align-items: center; gap: 16px; padding: 10px 0; color: var(--text); }
+  .side-links a:hover { text-decoration: none; color: var(--green); }
+  .side-links svg { width: 20px; height: 20px; color: var(--muted); flex: none; }
+
+  /* App list (catalog and "more apps") */
+  .apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 24px; }
+  aside .apps { grid-template-columns: 1fr; }
+  .app { display: flex; gap: 16px; align-items: center; padding: 8px; margin: 0 -8px; border-radius: 8px; color: var(--text); }
+  .app:hover { background: var(--surface); text-decoration: none; }
+  .app img { width: 64px; height: 64px; border-radius: 14px; flex: none; background: var(--surface); box-shadow: 0 1px 2px rgba(60,64,67,.2); object-fit: cover; }
+  .app .name { font-weight: 400; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app .tag { color: var(--muted); font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .app .cat { color: var(--subtle); font-size: 12px; }
+
+  footer { color: var(--muted); font-size: 12px; padding: 24px 0 40px; border-top: 1px solid var(--divider); margin-top: 24px; }
+  footer a { color: var(--muted); }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 840px) {
+    main { grid-template-columns: 1fr; gap: 0; }
+    .hero { grid-template-columns: 1fr; padding-top: 24px; }
+    .hero img.icon { display: none; }
+    .hero .icon-sm { display: flex; gap: 20px; align-items: center; }
+    .hero .icon-sm img { width: 72px; height: 72px; border-radius: 16px; box-shadow: var(--shadow); flex: none; }
+    .hero .icon-sm h1 { font-size: 24px; margin: 0 0 4px; }
+    .hero .title-lg { display: none; }
+    .stats { overflow-x: auto; }
+    .stats li { padding: 0 16px; }
+    .btn.install { flex: 1; }
+    .tabs a.hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <a class="brand" href="https://store.itsash.in/"><span class="logo">A</span><span>Ash Store</span></a>
+    <nav class="tabs">
+      <a class="hide-sm" href="https://store.itsash.in/">Apps</a>
+      <a class="hide-sm" id="nav-releases" href="#">Releases</a>
+      <a id="nav-github" href="#">GitHub</a>
+    </nav>
+  </div>
+</div>
+
+<div class="wrap">
+  <header class="hero">
+    <div>
+      <div class="icon-sm">
+        <img id="icon-sm" alt="">
+        <div><h1 id="name-sm"></h1><div class="dev"><a href="https://itsash.in">itsash.in</a></div></div>
+      </div>
+      <div class="title-lg">
+        <h1 id="name"></h1>
+        <div class="dev"><a href="https://itsash.in">itsash.in</a></div>
+      </div>
+      <div class="sub" id="tagline"></div>
+
+      <ul class="stats">
+        <li><div class="v" id="stat-version">Latest</div><div class="l">Version</div></li>
+        <li id="stat-size-li" hidden><div class="v" id="stat-size"></div><div class="l">Download</div></li>
+        <li><div class="v">Free</div><div class="l">No account</div></li>
+        <li id="stat-cat-li" hidden><div class="v" id="stat-cat"></div><div class="l">Category</div></li>
+      </ul>
+
+      <div class="ctas">
+        <a class="btn install" id="download" href="#">Install</a>
+        <a class="btn" id="store-link" href="https://store.itsash.in/">Get Ash Store</a>
+      </div>
+      <div class="note">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 1H7c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H7V5h10v14z"/></svg>
+        <span>This app is available for Android phones and tablets</span>
+      </div>
+    </div>
+    <img class="icon" id="icon" alt="">
+  </header>
+
+  <main>
+    <div>
+      <section id="about" hidden>
+        <div class="sec-head"><h2>About this app</h2>
+          <a class="arrow" id="about-arrow" href="#" aria-label="Source code"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg></a>
+        </div>
+        <div class="desc" id="description"></div>
+        <div class="updated" id="updated" hidden><div class="l">Updated on</div><div class="v" id="updated-date"></div></div>
+        <div class="chips" id="chips"></div>
+      </section>
+
+      <section id="catalog" hidden>
+        <div class="sec-head"><h2>Apps</h2></div>
+        <div class="apps" id="apps"></div>
+      </section>
+
+      <section id="news" hidden>
+        <div class="sec-head"><h2>What's new</h2>
+          <a class="arrow" id="news-arrow" href="#" aria-label="Release notes"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg></a>
+        </div>
+        <div class="whatsnew" id="whatsnew"></div>
+      </section>
+
+      <section>
+        <div class="sec-head"><h2>Data safety</h2></div>
+        <div class="safety">
+          <div class="row"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+            <div><div class="t">Open source</div><div class="s">Every line of code is public on GitHub</div></div></div>
+          <div class="row"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+            <div><div class="t">No account needed</div><div class="s">Install and use it without signing up</div></div></div>
+          <div class="row"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            <div><div class="t">Verified download</div><div class="s">Each release ships with a SHA-256 checksum</div></div></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head"><h2>How to install</h2></div>
+        <ol class="steps">
+          <li>Tap <b>Install</b> on your Android phone to download the APK.</li>
+          <li>Open the file. If Android asks, allow your browser to <b>install unknown apps</b>.</li>
+          <li id="step-store">Or install <a href="https://store.itsash.in/">Ash Store</a> once and get every app and its updates from there.</li>
+        </ol>
+      </section>
+    </div>
+
+    <aside>
+      <section>
+        <h3>App support</h3>
+        <div class="side-links">
+          <a id="side-github" href="#"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>Source code</a>
+          <a id="side-issues" href="#"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 12h-2v-2h2v2zm0-4h-2V6h2v4z"/></svg>Report a problem</a>
+          <a id="side-releases" href="#"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>All versions</a>
+          <a href="https://itsash.in"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>Developer website</a>
+        </div>
+      </section>
+      <section id="more" hidden>
+        <h3>More by itsash.in</h3>
+        <div class="apps" id="more-apps"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer>
+    <span id="foot-name"></span> is open source on <a id="foot-github" href="#">GitHub</a>. Built by <a href="https://itsash.in">itsash.in</a>.
+    Android is a trademark of Google LLC.
+  </footer>
+</div>
+
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const m = await (await fetch("store.json", { cache: "no-cache" })).json();
+  const gh = `https://github.com/${m.repo}`;
+  const icon = m.icon ? (m.icon.startsWith("http") ? m.icon : m.icon.replace(/^\.?\//, "")) : "";
+
+  document.title = `${m.name}: ${m.tagline}`;
+  document.querySelector('meta[name="description"]').content = m.tagline || "";
+  document.querySelector('link[rel="icon"]').href = icon;
+  for (const id of ["icon", "icon-sm"]) $(id).src = icon;
+  for (const id of ["name", "name-sm", "foot-name"]) $(id).textContent = m.name;
+  $("tagline").textContent = m.tagline || "";
+  for (const id of ["nav-github", "foot-github", "side-github", "about-arrow"]) $(id).href = gh;
+  for (const id of ["nav-releases", "side-releases", "news-arrow"]) $(id).href = `${gh}/releases`;
+  $("side-issues").href = `${gh}/issues`;
+  $("download").href = `${gh}/releases/latest/download/${m.id}.apk`;
+  if (m.category) {
+    $("stat-cat").textContent = m.category; $("stat-cat-li").hidden = false;
+    const c = document.createElement("span"); c.className = "chip"; c.textContent = m.category; $("chips").append(c);
+  }
+  for (const t of ["Android", "Open source"]) {
+    const c = document.createElement("span"); c.className = "chip"; c.textContent = t; $("chips").append(c);
+  }
+  if (m.catalog) { $("store-link").hidden = true; $("step-store").hidden = true; $("more").remove(); }
+  if (m.description || m.tagline) { $("description").textContent = m.description || m.tagline; $("about").hidden = false; }
+
+  const api = (path) => fetch(`https://api.github.com/${path}`, { headers: { Accept: "application/vnd.github+json" } })
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const size = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+
+  const rel = await api(`repos/${m.repo}/releases/latest`);
+  if (rel) {
+    const apk = (rel.assets || []).find((a) => a.name === `${m.id}.apk`) || (rel.assets || []).find((a) => a.name.endsWith(".apk"));
+    if (apk) {
+      $("download").href = apk.browser_download_url;
+      $("stat-size").textContent = size(apk.size); $("stat-size-li").hidden = false;
+    }
+    $("stat-version").textContent = rel.tag_name.replace(/^v/, "");
+    $("updated-date").textContent = new Date(rel.published_at).toLocaleDateString(undefined, { dateStyle: "medium" });
+    $("updated").hidden = false;
+    const notes = (rel.body || "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .split("\n")
+      .filter((l) => l.trim() && !/^\*\*Full Changelog\*\*/.test(l))
+      .map((l) => l.replace(/^#+\s*/, "").replace(/^\s*[*-]\s+/, "• ").replace(/\*\*/g, "").replace(/ by @\S+ in https:\/\/\S+/, ""))
+      .join("\n").trim();
+    $("whatsnew").textContent = notes || `${m.name} ${rel.tag_name}`;
+    $("news").hidden = false;
+  }
+
+  const owner = m.repo.split("/")[0];
+  const found = await api(`search/repositories?q=topic:ash-store+user:${owner}&per_page=100`);
+  const apps = (await Promise.all((found?.items || []).map(async (r) => {
+    try {
+      const s = await (await fetch(`https://raw.githubusercontent.com/${r.full_name}/${r.default_branch}/store.json`)).json();
+      if (s.listed === false || s.id === m.id) return null;
+      return { ...s, branch: r.default_branch };
+    } catch { return null; }
+  }))).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+
+  const card = (a) => {
+    const el = document.createElement("a");
+    el.className = "app";
+    el.href = a.homepage || `https://github.com/${a.repo}`;
+    const img = document.createElement("img");
+    img.alt = ""; img.loading = "lazy";
+    img.src = a.icon?.startsWith("http") ? a.icon : `https://raw.githubusercontent.com/${a.repo}/${a.branch}/${a.icon}`;
+    const text = document.createElement("div");
+    text.style.minWidth = "0";
+    for (const [cls, t] of [["name", a.name], ["tag", a.tagline], ["cat", a.category]]) {
+      const d = document.createElement("div"); d.className = cls; d.textContent = t || ""; text.append(d);
+    }
+    el.append(img, text);
+    return el;
+  };
+
+  if (m.catalog) {
+    for (const a of apps) $("apps").append(card(a));
+    $("catalog").hidden = apps.length === 0;
+  } else {
+    for (const a of apps.slice(0, 6)) $("more-apps").append(card(a));
+    $("more").hidden = apps.length === 0;
+  }
+})();
+</script>
+</body>
+</html>

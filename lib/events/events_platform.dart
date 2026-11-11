@@ -1,0 +1,96 @@
+import 'package:flutter/services.dart';
+
+import 'gesture.dart';
+
+/// One gesture's saved setting.
+class GestureSetting {
+  const GestureSetting({required this.enabled, required this.action});
+
+  final bool enabled;
+  final GestureAction action;
+}
+
+/// Everything the background service reads, as saved on the phone.
+class EventsConfig {
+  const EventsConfig({
+    required this.enabled,
+    required this.running,
+    required this.screenOff,
+    required this.vibrate,
+    required this.sensitivity,
+    required this.gestures,
+  });
+
+  factory EventsConfig.fromMap(Map<Object?, Object?> map) {
+    final g = (map['gestures'] as Map<Object?, Object?>?) ?? const {};
+    return EventsConfig(
+      enabled: map['enabled'] as bool? ?? false,
+      running: map['running'] as bool? ?? false,
+      screenOff: map['screenOff'] as bool? ?? true,
+      vibrate: map['vibrate'] as bool? ?? true,
+      sensitivity: map['sensitivity'] as String? ?? 'normal',
+      gestures: {
+        for (final kind in GestureKind.values)
+          kind: GestureSetting(
+            enabled: ((g[kind.key] as Map<Object?, Object?>?)?['enabled'] as bool?) ?? false,
+            action: GestureAction.of((g[kind.key] as Map<Object?, Object?>?)?['action'] as String?),
+          ),
+      },
+    );
+  }
+
+  final bool enabled;
+  final bool running;
+  final bool screenOff;
+  final bool vibrate;
+  final String sensitivity;
+  final Map<GestureKind, GestureSetting> gestures;
+
+  /// Actions used by the enabled gestures (flip counts as Do Not Disturb).
+  Set<GestureAction> get usedActions => {
+    for (final e in gestures.entries)
+      if (e.value.enabled) e.key.fixedAction ? GestureAction.dnd : e.value.action,
+  };
+}
+
+/// Permissions and sensors on this phone.
+class EventsStatus {
+  const EventsStatus(this._map);
+
+  final Map<Object?, Object?> _map;
+
+  bool _b(String k) => _map[k] as bool? ?? false;
+  bool get notifications => _b('notifications');
+  bool get overlay => _b('overlay');
+  bool get dnd => _b('dnd');
+  bool get battery => _b('battery');
+  bool get tileSupported => _b('tileSupported');
+  bool has(GestureSensor s) => _b(s.name);
+}
+
+/// Dart side of MethodChannel "com.itsash.flick/control" (MainActivity.kt).
+class EventsPlatform {
+  const EventsPlatform();
+
+  static const _channel = MethodChannel('com.itsash.flick/control');
+
+  Future<EventsConfig> config() async =>
+      EventsConfig.fromMap(await _channel.invokeMapMethod<Object?, Object?>('getConfig') ?? const {});
+
+  Future<EventsStatus> status() async =>
+      EventsStatus(await _channel.invokeMapMethod<Object?, Object?>('status') ?? const {});
+
+  Future<void> setEnabled(bool enabled) => _channel.invokeMethod('setEnabled', {'enabled': enabled});
+
+  Future<void> setOption(String key, Object value) => _channel.invokeMethod('setOption', {'key': key, 'value': value});
+
+  Future<void> setGesture(GestureKind g, {required bool enabled, required GestureAction action}) =>
+      _channel.invokeMethod('setGesture', {'gesture': g.key, 'enabled': enabled, 'action': action.key});
+
+  /// "notifications" | "overlay" | "dnd" | "battery"
+  Future<void> openPermission(String name) => _channel.invokeMethod('openPermission', {'name': name});
+
+  Future<void> tryAction(GestureAction a) => _channel.invokeMethod('tryAction', {'action': a.key});
+
+  Future<bool> addTile() async => await _channel.invokeMethod<bool>('addTile') ?? false;
+}
