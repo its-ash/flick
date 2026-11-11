@@ -13,10 +13,13 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.util.Log
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
+
+private const val TAG = "FlickAction"
 
 /** Runs a gesture's action. Lives as long as EventsService. */
 class ActionRunner(private val context: Context) {
@@ -28,11 +31,19 @@ class ActionRunner(private val context: Context) {
 
     private val torchCallback = object : CameraManager.TorchCallback() {
         override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
-            if (cameraId == torchId) torchOn = enabled
+            if (cameraId == torchId) {
+                torchOn = enabled
+                Diag.torchOn = enabled
+            }
+        }
+
+        override fun onTorchModeUnavailable(cameraId: String) {
+            if (cameraId == torchId) Diag.action("flashlight", "Torch unavailable (camera in use by another app)")
         }
     }
 
     init {
+        Diag.torchAvailable = torchId != null
         cameras?.registerTorchCallback(torchCallback, main)
     }
 
@@ -40,33 +51,60 @@ class ActionRunner(private val context: Context) {
         cameras?.unregisterTorchCallback(torchCallback)
     }
 
-    fun run(action: Action) {
+    /** Runs [action]. Returns null on success or a short error text; also recorded in [Diag]. */
+    fun run(action: Action): String? {
+        var error: String? = null
         try {
             when (action) {
                 Action.WAKE -> wakeScreen()
-                Action.FLASHLIGHT -> toggleTorch()
+                Action.FLASHLIGHT -> error = toggleTorch()
                 Action.CAMERA -> openCamera()
                 Action.MEDIA -> playPause()
                 Action.DND -> toggleDnd()
             }
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
             // A failed action (camera in use, permission revoked) must never stop the service.
+            error = e.message ?: e.javaClass.simpleName
+            Log.w(TAG, "action ${action.key} failed", e)
         }
+        Diag.action(action.key, error)
+        return error
     }
 
-    private fun findTorchCamera(): String? = try {
-        cameras?.cameraIdList?.firstOrNull { id ->
-            val c = cameras.getCameraCharacteristics(id)
-            c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
-                c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+    /** Back camera with a flash; else any camera with a flash. Each camera is probed on its own. */
+    private fun findTorchCamera(): String? {
+        val mgr = cameras ?: return null
+        val ids = try {
+            mgr.cameraIdList
+        } catch (e: Throwable) {
+            Log.w(TAG, "cameraIdList failed", e)
+            return null
         }
-    } catch (_: Throwable) {
-        null
+        var anyFlash: String? = null
+        for (id in ids) {
+            try {
+                val c = mgr.getCameraCharacteristics(id)
+                if (c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) != true) continue
+                if (c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK) return id
+                if (anyFlash == null) anyFlash = id
+            } catch (e: Throwable) {
+                Log.w(TAG, "camera $id unreadable", e)
+            }
+        }
+        return anyFlash
     }
 
-    private fun toggleTorch() {
-        val id = torchId ?: return
-        cameras?.setTorchMode(id, !torchOn)
+    private fun toggleTorch(): String? {
+        val id = torchId ?: return "This phone has no flashlight"
+        val target = !torchOn
+        return try {
+            cameras?.setTorchMode(id, target)
+            Log.i(TAG, "torch -> $target")
+            null
+        } catch (e: Throwable) {
+            Log.w(TAG, "setTorchMode failed", e)
+            e.message ?: e.javaClass.simpleName
+        }
     }
 
     /** Turns the screen on (the lock screen shows if the phone is locked). */

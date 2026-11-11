@@ -36,11 +36,11 @@ enum GestureKind {
     Icons.waving_hand_rounded,
     GestureSensor.proximity,
   ),
-  shake(
-    'shake',
-    'Shake side to side',
-    'Shake side to side to toggle the flashlight: left, right, left, right, left. Small or big, keep it continuous.',
-    Icons.vibration_rounded,
+  chop(
+    'chop',
+    'Chop twice',
+    'Hold the phone like a knife and chop down twice to turn the flashlight on or off.',
+    Icons.flashlight_on_rounded,
     GestureSensor.accelerometer,
   ),
   twist(

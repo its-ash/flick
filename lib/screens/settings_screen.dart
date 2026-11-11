@@ -27,23 +27,40 @@ class SettingsScreen extends StatelessWidget {
             children: [
               UiSection(
                 title: 'Sensitivity',
-                subtitle: 'High catches gentler moves but may trigger by accident.',
-                child: UiSegmentedControl<String>(
-                  const [
-                    UiSegment('low', label: 'Low'),
-                    UiSegment('normal', label: 'Normal'),
-                    UiSegment('high', label: 'High'),
+                subtitle:
+                    'Chop trigger level: Low 16, Medium 12, High 8 m/s². High catches gentler chops but may trigger by accident.',
+                child: UiColumn(
+                  gap: UiSpace.md,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    UiSegmentedControl<String>(
+                      const [
+                        UiSegment('low', label: 'Low'),
+                        UiSegment('normal', label: 'Medium'),
+                        UiSegment('high', label: 'High'),
+                      ],
+                      value: c.sensitivity,
+                      expand: true,
+                      onChanged: (v) => store.setOption('sensitivity', v),
+                    ),
+                    UiSlider(
+                      value: c.chopThreshold.clamp(6.0, 20.0),
+                      min: 6,
+                      max: 20,
+                      divisions: 28,
+                      label: 'Chop trigger level (m/s²)',
+                      format: (v) => v.toStringAsFixed(1),
+                      onChangeEnd: (v) => store.setOption('chopThreshold', v),
+                    ),
                   ],
-                  value: c.sensitivity,
-                  expand: true,
-                  onChanged: (v) => store.setOption('sensitivity', v),
                 ),
               ),
               UiListGroup(
                 header: 'Background',
                 footer:
-                    'Android pauses motion sensors when the screen is off. Keeping them awake lets Shake and Twist '
-                    'work with the screen off, at some battery cost.',
+                    'Android pauses motion sensors when the screen is off. Keeping them awake lets Chop twice and Twist '
+                    'work with the screen off, at some battery cost. Pocket gate: Motorola ignores chops while the '
+                    'proximity sensor is covered; on some phones that sensor stays covered by mistake, so it is off.',
                 children: [
                   UiSwitchTile(
                     'Work with the screen off',
@@ -51,6 +68,21 @@ class SettingsScreen extends StatelessWidget {
                     value: c.screenOff,
                     onChanged: (v) => store.setOption('screenOff', v),
                   ),
+                  UiSwitchTile(
+                    'Pocket gate',
+                    subtitle: 'Ignore chops while the phone is covered (proximity sensor).',
+                    icon: Icons.sensors_rounded,
+                    value: c.pocketGate,
+                    onChanged: (v) => store.setOption('pocketGate', v),
+                  ),
+                  if (c.hasAxis)
+                    UiSwitchTile(
+                      'Only my chop direction',
+                      subtitle: 'Ignore chops that are not within 45° of the direction learned in Calibrate.',
+                      icon: Icons.open_with_rounded,
+                      value: c.chopAxisOnly,
+                      onChanged: (v) => store.setOption('chopAxisOnly', v),
+                    ),
                   UiSwitchTile(
                     'Vibrate on a gesture',
                     icon: Icons.vibration_rounded,
@@ -72,11 +104,11 @@ class SettingsScreen extends StatelessWidget {
               ),
               UiListGroup(
                 header: 'Gestures',
-                footer: 'See a live motion meter, and teach Flick how hard you shake and twist.',
+                footer: 'See the peak of each chop, calibrate Flick to your chop, and check why a gesture does nothing.',
                 children: [
                   UiListTile(
                     'Test gestures',
-                    subtitle: 'Live meter and training',
+                    subtitle: 'Live peak meter, Calibrate, Diagnostics',
                     icon: Icons.speed_rounded,
                     chevron: true,
                     onTap: () => Navigator.of(context).push(
@@ -90,7 +122,14 @@ class SettingsScreen extends StatelessWidget {
                 footer: 'Runs the action now, to check it works on this phone.',
                 children: [
                   for (final a in GestureAction.values)
-                    UiListTile(a.label, icon: a.icon, onTap: () => store.platform.tryAction(a)),
+                    UiListTile(
+                      a.label,
+                      icon: a.icon,
+                      onTap: () async {
+                        final err = await store.platform.tryAction(a);
+                        if (context.mounted && err != null) context.showToast(err, status: UiStatus.danger);
+                      },
+                    ),
                 ],
               ),
               const UiAppearanceSection(),

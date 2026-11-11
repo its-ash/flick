@@ -3,8 +3,8 @@
   "name": "Flick",
   "repo": "its-ash/flick",
   "package": "com.itsash.flick",
-  "tagline": "Phone gestures that work in the background: shake for light, twist for camera.",
-  "description": "Flick listens to your phone's motion sensors in the background and turns gestures into actions. Shake side to side for the flashlight, twist twice for the camera, pick up or wave over the phone to light the screen, and flip it face down for Do Not Disturb. Choose what each gesture does, set the sensitivity, and switch it all on or off from a Quick Settings tile. Everything runs on your phone.",
+  "tagline": "Phone gestures that work in the background: chop twice for light, twist for camera.",
+  "description": "Flick listens to your phone's motion sensors in the background and turns gestures into actions. Chop twice like on a Motorola phone for the flashlight, twist twice for the camera, pick up or wave over the phone to light the screen, and flip it face down for Do Not Disturb. Choose what each gesture does, set the sensitivity, and switch it all on or off from a Quick Settings tile. Everything runs on your phone.",
   "category": "Utilities",
   "icon": "assets/icon/logo-1024.png",
   "homepage": "https://flick.itsash.in/"

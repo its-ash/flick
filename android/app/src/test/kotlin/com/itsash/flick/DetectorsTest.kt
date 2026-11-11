@@ -36,6 +36,18 @@ private class Trace(val lengthMs: Long) {
         pulse(atMs + 70, 70, -0.8f * amp, dir)
     }
 
+    /** A sine of [hz] along [dir], [halfCycles] half-waves from [startMs]. */
+    fun sine(startMs: Long, halfCycles: Int, hz: Float, amp: Float, dir: FloatArray) {
+        val end = startMs + (halfCycles * 500f / hz).toLong()
+        for (i in 0 until n) {
+            val t = i * STEP
+            if (t in startMs until end) {
+                val s = (amp * sin(2 * PI * hz * (t - startMs) / 1000.0)).toFloat()
+                x[i] += s * dir[0]; y[i] += s * dir[1]; z[i] += s * dir[2]
+            }
+        }
+    }
+
     fun noise(amp: Float, seed: Int = 1) {
         val r = Random(seed)
         for (i in 0 until n) {
@@ -61,165 +73,257 @@ private class Trace(val lengthMs: Long) {
         for (i in 0 until n) if (add(i * STEP * MS, x[i], y[i], z[i])) out.add(i * STEP)
         return out
     }
+
+    /** Like [run] but mutes the detector for 290 ms after each fire, as the engine does for its own buzz. */
+    fun runWithBuzz(d: ChopDetector): List<Long> {
+        val out = ArrayList<Long>()
+        for (i in 0 until n) {
+            val t = i * STEP
+            if (d.add(t * MS, x[i], y[i], z[i])) {
+                out.add(t)
+                d.mute((t + 290) * MS)
+            }
+        }
+        return out
+    }
 }
 
 private val X = floatArrayOf(1f, 0f, 0f)
 private val Y = floatArrayOf(0f, 1f, 0f)
 private val Z = floatArrayOf(0f, 0f, 1f)
-private val DIAG = floatArrayOf(0.6f, 0.6f, 0.53f)
 
 class DetectorsTest {
 
-    // ---- shake ----
+    // ---- chop twice ----
 
-    private val PORTRAIT = floatArrayOf(0f, 9.8f, 0f)
-    private val LANDSCAPE = floatArrayOf(9.8f, 0f, 0f)
-    private val FLAT = floatArrayOf(0f, 0f, 9.8f)
-    private val TILTED = floatArrayOf(0f, 6.93f, 6.93f)
+    private val AMP = 18f // a normal chop, linear acceleration m/s²
+    private val DOWN_PORTRAIT = floatArrayOf(0f, -1f, 0f) // phone upright, chop downwards
+    private val FORWARD_PORTRAIT = floatArrayOf(0f, 0f, -1f) // chop away from the user
+    private val DOWN_LANDSCAPE = floatArrayOf(-1f, 0f, 0f)
+    private val DOWN_FLAT = floatArrayOf(0f, 0f, -1f)
 
-    /** [halfCycles] half-swings of a [hz] sine along [dir]; peak acceleration [amp]. */
-    private fun Trace.sine(startMs: Long, halfCycles: Int, hz: Float, amp: Float, dir: FloatArray) {
-        val lenMs = (halfCycles * 1000f / (2 * hz)).toLong()
-        for (i in 0 until n) {
-            val t = i * STEP
-            if (t in startMs until startMs + lenMs) {
-                val s = sin(2 * PI * hz * (t - startMs) / 1000.0).toFloat() * amp
-                x[i] += s * dir[0]; y[i] += s * dir[1]; z[i] += s * dir[2]
-            }
+    private fun doubleChop(dir: FloatArray, amp: Float = AMP, first: Long = 1000, gap: Long = 350, ms: Long = 4000) =
+        Trace(ms).apply {
+            chop(first, amp, dir)
+            chop(first + gap, amp, dir)
+            noise(0.1f)
         }
-    }
 
-    private fun fires(t: Trace, g: FloatArray, d: ShakeDetector = ShakeDetector()): List<Long> {
-        d.setGravity(g[0], g[1], g[2])
-        return t.run(d::add)
-    }
-
-    /** A shake of [halfCycles] swings along a horizontal axis for the given gravity. */
-    private fun shakeTrace(g: FloatArray, dir: FloatArray, halfCycles: Int, amp: Float, hz: Float = 3f): Trace =
-        Trace(4000).apply {
-            sine(1000, halfCycles, hz, amp, dir)
-            sine(1000, halfCycles, hz, amp * 0.25f, g.map { it / 9.8f }.toFloatArray()) // a little vertical leak
-            noise(0.05f)
-        }
+    private fun fires(t: Trace, d: ChopDetector = ChopDetector()): List<Long> = t.run(d::add)
 
     @Test
-    fun smallFiveSwingShakeFires() {
-        val fired = fires(shakeTrace(PORTRAIT, X, 5, 2.4f), PORTRAIT)
+    fun doubleChopFiresInAnyDirectionAndOrientation() {
+        val dirs = mapOf(
+            "down, portrait" to DOWN_PORTRAIT,
+            "forward, portrait" to FORWARD_PORTRAIT,
+            "down, landscape" to DOWN_LANDSCAPE,
+            "down, flat" to DOWN_FLAT,
+            "sideways" to X,
+            "diagonal" to floatArrayOf(0.6f, -0.6f, 0.53f),
+            "up" to Y,
+        )
+        for ((name, dir) in dirs) {
+            val fired = fires(doubleChop(dir))
+            assertEquals("$name $fired", 1, fired.size)
+        }
+    }
+
+    @Test
+    fun doubleChopFiresAcrossTimingAndStrength() {
+        for (gap in listOf(250L, 350L, 500L, 700L, 780L)) {
+            assertEquals("gap $gap", 1, fires(doubleChop(Y, gap = gap)).size)
+        }
+        for (amp in listOf(14f, 25f, 40f)) {
+            assertEquals("amp $amp", 1, fires(doubleChop(Y, amp = amp)).size)
+        }
+    }
+
+    @Test
+    fun singleChopDoesNotFire() {
+        val t = Trace(4000).apply { chop(1000, AMP, Y); noise(0.1f) }
+        assertEquals(0, fires(t).size)
+    }
+
+    @Test
+    fun twoChopsFarApartDoNotFire() {
+        val t = Trace(5000).apply { chop(1000, AMP, Y); chop(2500, AMP, Y); noise(0.1f) }
+        assertEquals(0, fires(t).size)
+        val tooFast = Trace(4000).apply { chop(1000, AMP, Y); chop(1100, AMP, Y); noise(0.1f) }
+        assertEquals(0, fires(tooFast).size)
+    }
+
+    @Test
+    fun tripleChopFiresOnceAndDoesNotCancel() {
+        val t = Trace(5000).apply { chop(1000, AMP, Y); chop(1350, AMP, Y); chop(1700, AMP, Y); noise(0.1f) }
+        val fired = fires(t)
         assertEquals(fired.toString(), 1, fired.size)
+        val four = Trace(6000).apply { for (k in 0 until 4) chop(1000 + k * 350L, AMP, Y); noise(0.1f) }
+        assertEquals(1, fires(four).size)
     }
 
     @Test
-    fun largeShakeFires() {
-        val fired = fires(shakeTrace(PORTRAIT, X, 6, 18f, hz = 2.5f), PORTRAIT)
-        assertEquals(fired.toString(), 1, fired.size)
-    }
-
-    @Test
-    fun fourSwingsAlsoFireFastAndSlow() {
-        for (hz in listOf(1.8f, 3f, 5f)) {
-            val fired = fires(shakeTrace(PORTRAIT, X, 6, 6f, hz), PORTRAIT)
-            assertEquals("hz $hz $fired", 1, fired.size)
+    fun secondDoubleChopTogglesAgain() {
+        // Torch on at ~1.4 s, torch off at ~2.6 s (1.2 s later), and once more later.
+        val t = Trace(9000).apply {
+            chop(1000, AMP, Y); chop(1350, AMP, Y)
+            chop(2200, AMP, Y); chop(2550, AMP, Y)
+            chop(5000, AMP, X); chop(5400, AMP, X)
+            noise(0.1f)
         }
+        val fired = fires(t)
+        assertEquals(fired.toString(), 3, fired.size)
     }
 
     @Test
-    fun threeSwingsDoNotFire() {
-        assertEquals(0, fires(shakeTrace(PORTRAIT, X, 3, 8f), PORTRAIT).size)
-        assertEquals(0, fires(shakeTrace(PORTRAIT, X, 4, 8f), PORTRAIT).size)
-    }
-
-    @Test
-    fun pauseInTheMiddleResets() {
-        val t = Trace(6000).apply {
-            sine(1000, 3, 3f, 6f, X)
-            sine(2500, 3, 3f, 6f, X) // 1 s of rest, then 3 more: never 5 in a row
-            noise(0.05f)
+    fun chopAfterTheBuzzStillWorks() {
+        val t = Trace(9000).apply {
+            chop(1000, AMP, Y); chop(1350, AMP, Y)
+            // our own vibration right after the fire: two sharp ticks
+            pulse(1500, 30, 20f, Z); pulse(1600, 30, -20f, Z); pulse(1700, 30, 20f, Z)
+            chop(2400, AMP, Y); chop(2750, AMP, Y)
+            noise(0.1f)
         }
-        assertEquals(0, fires(t, PORTRAIT).size)
+        val fired = t.runWithBuzz(ChopDetector())
+        assertEquals(fired.toString(), 2, fired.size)
     }
 
     @Test
-    fun restingPhoneAndTremorDoNotFire() {
-        assertEquals(0, fires(Trace(20000).apply { noise(0.08f) }, FLAT).size)
+    fun vibrationFeedbackAloneDoesNotFire() {
+        val d = ChopDetector()
+        val t = Trace(3000).apply { pulse(1000, 30, 20f, Z); pulse(1100, 30, -20f, Z); pulse(1200, 30, 20f, Z); pulse(1300, 30, -20f, Z) }
+        // Muted for 800 ms around it, as after a gesture's own buzz.
+        d.mute(1500 * MS)
+        assertEquals(0, fires(t, d).size)
+    }
+
+    @Test
+    fun restingPhoneTableAndTremorDoNotFire() {
+        assertEquals(0, fires(Trace(20000).apply { noise(0.05f) }).size)
         // tremor: 8 Hz, 0.3 m/s²
         val tremor = Trace(10000).apply { sine(500, 70, 8f, 0.3f, X); noise(0.05f) }
-        assertEquals(0, fires(tremor, PORTRAIT).size)
+        assertEquals(0, fires(tremor).size)
+        // a phone put down on a table: one soft bump
+        val bump = Trace(4000).apply { pulse(1000, 40, 7f, Z); pulse(1040, 40, -4f, Z); noise(0.05f) }
+        assertEquals(0, fires(bump).size)
     }
 
-    private fun walkTrace(g: FloatArray, hz: Float, vertical: Float, forward: Float, lateral: Float, ms: Long = 20000): Trace =
-        Trace(ms).apply {
-            val cycles = (ms / 1000f * hz * 2).toInt()
-            sine(0, cycles, hz, vertical, g.map { it / 9.8f }.toFloatArray())
-            sine(0, cycles, hz, forward, X)
-            sine(0, cycles / 2, hz / 2, lateral, Z)
-            noise(0.3f, 5)
+    @Test
+    fun walkingDoesNotFire() {
+        assertEquals(0, fires(Trace(30000).apply { walking(2f); noise(0.3f, 5) }).size)
+        assertEquals(0, fires(Trace(30000).apply { walking(3.5f); noise(0.3f, 6) }).size)
+        // in a pocket: stronger vertical sway
+        val pocket = Trace(30000).apply { sine(0, 120, 2f, 6f, Y); sine(0, 120, 2f, 3f, Z); noise(0.3f, 7) }
+        assertEquals(0, fires(pocket).size)
+    }
+
+    @Test
+    fun joggingAndStairsDoNotFire() {
+        // Jogging: 2.7 Hz heel strikes on top of a strong sway, phone in a pocket.
+        val jog = Trace(30000).apply {
+            sine(0, 160, 2.7f, 8f, Y)
+            var s = 500L
+            while (s < 29000) { pulse(s, 60, 18f, Y); pulse(s + 60, 60, -12f, Y); s += 370 }
+            noise(0.3f, 8)
         }
-
-    @Test
-    fun walkingAndJoggingDoNotFire() {
-        // phone upright in a hand: vertical = y
-        assertEquals(0, fires(walkTrace(PORTRAIT, 1.9f, 3f, 1.8f, 1.2f), PORTRAIT).size)
-        assertEquals(0, fires(walkTrace(PORTRAIT, 2.8f, 12f, 4f, 3f), PORTRAIT).size)
-        // phone held flat: vertical = z
-        assertEquals(0, fires(walkTrace(FLAT, 2f, 3f, 1.8f, 1.2f), FLAT).size)
-    }
-
-    @Test
-    fun upAndDownShakeDoesNotFire() {
-        assertEquals(0, fires(shakeTrace(PORTRAIT, PORTRAIT.map { it / 9.8f }.toFloatArray(), 8, 8f), PORTRAIT).size)
-    }
-
-    @Test
-    fun continuousFourSecondShakeTogglesOnce() {
-        val t = Trace(7000).apply { sine(1000, 24, 3f, 8f, X); noise(0.05f) }
-        val fired = fires(t, PORTRAIT)
-        assertEquals(fired.toString(), 1, fired.size)
-    }
-
-    @Test
-    fun anotherShakeAfterAPauseTogglesAgain() {
-        val t = Trace(8000).apply {
-            sine(1000, 6, 3f, 6f, X)
-            sine(4000, 6, 3f, 6f, X)
-            noise(0.05f)
+        assertEquals(0, fires(jog).size)
+        // Stairs: a heel strike every 500 ms.
+        val stairs = Trace(30000).apply {
+            sine(0, 120, 2f, 7f, Y)
+            var s = 500L
+            while (s < 29000) { pulse(s, 60, 16f, Y); pulse(s + 60, 60, -10f, Y); s += 500 }
+            noise(0.3f, 9)
         }
-        assertEquals(2, fires(t, PORTRAIT).size)
+        assertEquals(0, fires(stairs).size)
     }
 
     @Test
-    fun worksInAnyOrientation() {
-        val cases = listOf(
-            PORTRAIT to X, LANDSCAPE to Y, FLAT to floatArrayOf(0.7f, 0.7f, 0f), TILTED to X,
-            PORTRAIT to floatArrayOf(0.7f, 0f, 0.7f), // towards and away from the user's side
-        )
-        for ((g, dir) in cases) {
-            val fired = fires(shakeTrace(g, dir, 5, 3f), g)
-            assertEquals("g ${g.toList()} dir ${dir.toList()} $fired", 1, fired.size)
+    fun continuousShakeDoesNotFire() {
+        for (hz in listOf(2f, 3f, 5f)) {
+            for (amp in listOf(14f, 20f, 30f)) {
+                val t = Trace(8000).apply { sine(1000, (5 * 2 * hz).toInt(), hz, amp, X); noise(0.1f) }
+                val fired = fires(t)
+                assertEquals("shake $hz Hz amp $amp $fired", 0, fired.size)
+            }
         }
+        // a slow big swing (one long wave) never counts as a chop
+        val swing = Trace(6000).apply { sine(1000, 6, 1f, 25f, Y); noise(0.1f) }
+        assertEquals(0, fires(swing).size)
     }
 
     @Test
-    fun pocketAndVibrationAreIgnored() {
-        val near = ShakeDetector().apply { blocked = true }
-        assertEquals(0, fires(shakeTrace(PORTRAIT, X, 6, 6f), PORTRAIT, near).size)
-        val muted = ShakeDetector().apply { mute(5000 * MS) }
-        assertEquals(0, fires(shakeTrace(PORTRAIT, X, 6, 6f), PORTRAIT, muted).size)
+    fun sensitivityLowVersusHigh() {
+        val soft = doubleChop(Y, amp = 14f) // gentle chop
+        assertEquals(0, fires(soft, ChopDetector(ChopDetector.LOW)).size)
+        assertEquals(1, fires(soft, ChopDetector(ChopDetector.NORMAL)).size)
+        assertEquals(1, fires(soft, ChopDetector(ChopDetector.HIGH)).size)
+        val tiny = doubleChop(Y, amp = 10f)
+        assertEquals(0, fires(tiny, ChopDetector(ChopDetector.NORMAL)).size)
+        assertEquals(1, fires(tiny, ChopDetector(ChopDetector.HIGH)).size)
+        val hard = doubleChop(Y, amp = 25f)
+        assertEquals(1, fires(hard, ChopDetector(ChopDetector.LOW)).size)
+        assertEquals(ChopDetector.LOW, ChopDetector.forSensitivity("low"), 0f)
+        assertEquals(ChopDetector.HIGH, ChopDetector.forSensitivity("high"), 0f)
+        assertEquals(ChopDetector.NORMAL, ChopDetector.forSensitivity("normal"), 0f)
     }
 
     @Test
-    fun sensitivityAndTrainedFloor() {
-        val small = shakeTrace(PORTRAIT, X, 6, 1.3f)
-        assertEquals(0, fires(small, PORTRAIT, ShakeDetector(scale = 1.3f)).size)
-        assertEquals(1, fires(small, PORTRAIT, ShakeDetector(scale = 0.75f)).size)
-        assertEquals(1, fires(small, PORTRAIT, ShakeDetector(base = 0.9f)).size)
+    fun learnedDirectionConeFiltersOffAxisChops() {
+        val onX = ChopDetector().apply { axis = floatArrayOf(1f, 0f, 0f) }
+        assertEquals(1, fires(doubleChop(X), onX).size)
+        assertEquals(1, fires(doubleChop(floatArrayOf(0.91f, 0.41f, 0f)), ChopDetector().apply { axis = floatArrayOf(1f, 0f, 0f) }).size)
+        assertEquals(0, fires(doubleChop(Y), ChopDetector().apply { axis = floatArrayOf(1f, 0f, 0f) }).size)
+        assertEquals(0, fires(doubleChop(floatArrayOf(0.5f, 0.87f, 0f)), ChopDetector().apply { axis = floatArrayOf(1f, 0f, 0f) }).size)
     }
 
     @Test
-    fun trainedFloorStaysLowForBigShakers() {
-        val v = Calibration.threshold(listOf(20f, 25f, 22f), ShakeDetector.MIN_BASE, ShakeDetector.MAX_BASE, ShakeDetector.TRAIN_FRACTION)!!
-        assertEquals(ShakeDetector.MAX_BASE, v, 0.001f)
-        val soft = Calibration.threshold(listOf(2f, 2.5f, 2.2f), ShakeDetector.MIN_BASE, ShakeDetector.MAX_BASE, ShakeDetector.TRAIN_FRACTION)!!
-        assertEquals(0.9f, soft, 0.05f)
+    fun pocketGateBlocksOnlyWhenSet() {
+        val blocked = ChopDetector().apply { blocked = true }
+        assertEquals(0, fires(doubleChop(Y), blocked).size)
+        assertEquals(1, fires(doubleChop(Y)).size) // default: no gate
+    }
+
+    @Test
+    fun trainingReportsPeakAndAxis() {
+        val d = ChopDetector(ChopDetector.TRAIN_THRESHOLD)
+        assertEquals(1, fires(doubleChop(floatArrayOf(0.8f, 0.6f, 0f), amp = 20f), d).size)
+        assertTrue("peak ${d.lastPeak}", d.lastPeak in 17f..21f)
+        assertEquals(0.8f, Math.abs(d.lastAxis[0]), 0.15f)
+        assertEquals(0.6f, Math.abs(d.lastAxis[1]), 0.15f)
+        assertTrue(d.chopSeq >= 2)
+        assertTrue(d.burstSeq >= 1)
+    }
+
+    @Test
+    fun fallbackFromRawAccelerometerWorks() {
+        // Raw accelerometer = gravity + chop; GravityFilter removes gravity again.
+        val t = doubleChop(Y, ms = 4000)
+        val f = GravityFilter()
+        val d = ChopDetector()
+        val out = ArrayList<Long>()
+        for (i in 0 until t.n) {
+            val ts = i * STEP * MS
+            f.update(ts, t.x[i], t.y[i] + 9.8f, t.z[i])
+            if (d.add(ts, f.linear[0], f.linear[1], f.linear[2])) out.add(i * STEP)
+        }
+        assertEquals(out.toString(), 1, out.size)
+    }
+
+    @Test
+    fun sampleRateDoesNotMatter() {
+        // Same double chop sampled at 50 Hz (every other sample).
+        val t = doubleChop(Y)
+        val d = ChopDetector()
+        var fired = 0
+        for (i in 0 until t.n step 2) if (d.add(i * STEP * MS, t.x[i], t.y[i], t.z[i])) fired++
+        assertEquals(1, fired)
+    }
+
+    @Test
+    fun calibrationForChop() {
+        val v = Calibration.threshold(listOf(20f, 22f, 18f), ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD, ChopDetector.TRAIN_FRACTION)!!
+        assertEquals(12f, v, 0.01f)
+        val weak = Calibration.threshold(listOf(8f, 9f, 10f), ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD, ChopDetector.TRAIN_FRACTION)!!
+        assertEquals(ChopDetector.MIN_THRESHOLD, weak, 0.001f)
     }
 
     // ---- twist ----
@@ -241,7 +345,6 @@ class DetectorsTest {
 
     @Test
     fun twistWorksWhenPhoneIsUpsideDownOrFlat() {
-        // The sign flips with orientation, the back-and-forth pattern does not.
         assertEquals(1, twistTrace(floatArrayOf(0f, -1f, 0f)).run(TwistDetector()::add).size)
     }
 

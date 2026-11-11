@@ -13,6 +13,8 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
+import android.util.Log
 import android.service.quicksettings.TileService
 
 /**
@@ -49,8 +51,16 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                     FlipDetector.Event.FACE_UP -> runner.dndForFaceUp(prefs)
                 }
             }
-        })
-        startInForeground()
+        }, "service")
+        try {
+            startInForeground()
+        } catch (e: Throwable) {
+            // Android refused the foreground start (restricted background start): give up cleanly.
+            Log.e(TAG, "startForeground failed", e)
+            Diag.action("service", "Could not start in the foreground: ${e.message}")
+            stopSelf()
+            return
+        }
         prefs.prefs.registerOnSharedPreferenceChangeListener(this)
         configure()
         running = true
@@ -67,10 +77,11 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
     override fun onDestroy() {
         running = false
-        prefs.prefs.unregisterOnSharedPreferenceChangeListener(this)
-        engine.stop()
+        Diag.serviceHz = 0
+        if (::prefs.isInitialized) prefs.prefs.unregisterOnSharedPreferenceChangeListener(this)
+        if (::engine.isInitialized) engine.stop()
         wakeLock?.takeIf { it.isHeld }?.release()
-        runner.release()
+        if (::runner.isInitialized) runner.release()
         refreshTile()
         super.onDestroy()
     }
@@ -88,7 +99,7 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun configure() {
         engine.configure(Gesture.entries.filter { prefs.isEnabled(it) }.toSet())
 
-        // Non-wake-up sensors stop reporting when the CPU sleeps with the screen off.
+        // Belt and braces with the wake-up sensors: keep the CPU awake while the screen is off.
         if (prefs.screenOff) {
             if (wakeLock == null) {
                 wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flick:sensors").apply {
@@ -105,7 +116,8 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         if (paused) return // the test / train screen is open
         if ((gesture == Gesture.PICKUP || gesture == Gesture.WAVE) && power.isInteractive) return
         buzz(gesture)
-        runner.run(prefs.actionOf(gesture))
+        val error = runner.run(prefs.actionOf(gesture))
+        Log.i(TAG, "gesture ${gesture.key} -> ${prefs.actionOf(gesture).key} error=$error")
     }
 
     /** Own-pattern vibration; the engine also mutes shake / twist while it runs. */
@@ -128,7 +140,7 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_events)
             .setContentTitle("Gestures are on")
-            .setContentText("Tap to change which gestures Flick listens for.")
+            .setContentText("Chop twice for the flashlight. Tap to change gestures.")
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -144,6 +156,7 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     companion object {
+        private const val TAG = "FlickService"
         private const val CHANNEL = "events_service"
         private const val NOTIFICATION_ID = 7
 
@@ -154,7 +167,18 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         /** True while the test / train screen is open: gestures are detected there, not acted on. */
         @Volatile
-        var paused = false
+        private var pausedUntil = 0L
+
+        /**
+         * True while the test / train screen is open: gestures are detected there, not acted on.
+         * Setting true is a 3 s lease that the screen renews every 50 ms, so a screen that dies
+         * without cleaning up can never leave the real actions switched off.
+         */
+        var paused: Boolean
+            get() = SystemClock.elapsedRealtime() < pausedUntil
+            set(v) {
+                pausedUntil = if (v) SystemClock.elapsedRealtime() + 3000 else 0L
+            }
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, EventsService::class.java))

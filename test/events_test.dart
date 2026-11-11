@@ -12,7 +12,7 @@ Map<String, Object?> configMap({Map<String, Object?> gestures = const {}}) => {
   'gestures': {
     'pickup': {'enabled': true, 'action': 'wake'},
     'wave': {'enabled': false, 'action': 'wake'},
-    'shake': {'enabled': true, 'action': 'flashlight'},
+    'chop': {'enabled': true, 'action': 'flashlight'},
     'twist': {'enabled': true, 'action': 'camera'},
     'flip': {'enabled': false, 'action': 'dnd'},
     ...gestures,
@@ -33,9 +33,20 @@ void main() {
     expect(EventsConfig.fromMap(configMap()).trained, isEmpty);
     final c = EventsConfig.fromMap({
       ...configMap(),
-      'trained': {'shake': true, 'twist': false},
+      'trained': {'chop': true, 'twist': false},
     });
-    expect(c.trained, {'shake'});
+    expect(c.trained, {'chop'});
+  });
+
+  test('chop settings parse with safe defaults', () {
+    final d = EventsConfig.fromMap(configMap());
+    expect(d.chopThreshold, 12);
+    expect(d.pocketGate, isFalse);
+    final c = EventsConfig.fromMap({...configMap(), 'chopThreshold': 8.5, 'pocketGate': true, 'hasAxis': true});
+    expect(c.chopThreshold, 8.5);
+    expect(c.pocketGate, isTrue);
+    expect(c.hasAxis, isTrue);
+    expect(GestureKind.chop.title, 'Chop twice');
   });
 
   test('flip counts as Do Not Disturb', () {

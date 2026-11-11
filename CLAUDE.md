@@ -10,7 +10,7 @@ user picked. Flutter is only the settings UI.
 |---|---|---|---|
 | Pick up | accelerometer (gravity) | wake screen | only while the screen is off; phone must rest flat ≥ 1 s first |
 | Wave over | proximity (wake-up variant if present) | wake screen | only while the screen is off; near 80–1000 ms |
-| Shake side to side | linear acceleration (fallback: accelerometer + filter), gravity, proximity | flashlight | 5 swings (4 direction reversals, L-R-L-R-L), each ≤ 450 ms after the previous, any size, any orientation |
+| Chop twice | linear acceleration (fallback: accelerometer + filter); proximity only if "Pocket gate" is on | flashlight | two sharp push+stop spikes 150–800 ms apart, any direction/orientation; see Gesture design |
 | Twist twice | gyroscope X/Y (any orientation) | camera | 3 alternating peaks (out, back, out) within 1.6 s; adaptive threshold |
 | Flip | accelerometer (gravity z) | Do Not Disturb (fixed) | face down 1.5 s → DND on; face up → previous mode back |
 
@@ -19,25 +19,33 @@ low / normal / high scales thresholds ×1.3 / ×1 / ×0.75.
 
 ## Gesture design
 
-- Threshold = max(floor × sensitivity, K × recent motion RMS) (`NoiseTracker`):
-  walking raises it, rest lowers it back. Floor = built-in default or the user's
-  trained value (prefs `calib.shake` / `calib.twist`, set by Train = 3 gestures,
-  65 % of the median peak, `Calibration`; shake uses 40 % and a max floor of 3 m/s²
-  so small swings keep working). Shake uses K = 5 and a 4 s tracker, no other K.
-- Shake (`ShakeDetector`, replaced the old double-chop, which is removed; the
-  gesture key is now `shake`, old `chop` prefs are ignored): gravity-aligned part of
-  the linear acceleration is removed, the rest is projected on the principal axis
-  of recent motion (covariance, tau 0.6 s), so portrait/landscape/tilted all work.
-  Each acceleration lobe over the threshold with the opposite sign of the last one
-  is a swing; `reversals + 1` swings (default 4 reversals = 5, configurable 4–5 via
-  `ShakeDetector.reversals`) fire. Gap between swings 50–450 ms (a longer pause
-  resets: must be continuous); mean half-period 60–400 ms (~1.2–8 Hz). Rejected
-  when vertical (gravity-aligned) RMS > 0.7 × lateral RMS (walking, jogging, up-down
-  shaking) and while proximity is near (pocket/bag). Size does not matter beyond the
-  low floor (default 1.5 m/s², 0.8–3). After a fire it is locked until the motion
-  has stopped 500 ms and ≥ 700 ms passed, so one long shake toggles once. The torch
-  toggle itself is `ActionRunner` (TorchCallback state). Test screen shows motion
-  meter + "Swings n of 5"; Train works as for twist.
+- Twist threshold = max(floor × sensitivity, K × recent motion RMS) (`NoiseTracker`); floor =
+  default or trained value (prefs `calib.twist`, Train = 3 gestures, 65 % of the median peak).
+- Chop twice (`ChopDetector` in `ChopDetector.kt`, Motorola-style; key `chop`; replaced the
+  shake detector v1.0.3 and the double-chop before it). Input: linear acceleration (fallback:
+  accelerometer through `GravityFilter`), ~100 Hz, no gravity vector needed, any orientation.
+  Chop = push spike |a| ≥ threshold (≤ 150 ms wide, ≤ 80 m/s²) followed within 180 ms by an
+  opposite spike ≥ 0.5 × threshold along the push axis. Two chops on the same axis (|cos| ≥ 0.6),
+  150–800 ms apart (push to push), fire. Between chops the signal must stay < 0.35 × threshold
+  for 40 ms (a swing or shake never has that dip, so it never fires). First chop needs 600 ms
+  without activity ≥ 0.5 × threshold before it (walking / jogging / stairs never are calm);
+  slow noise RMS (clipped at 0.5 × threshold) > 0.3 × threshold = carried, nothing counts.
+  Cooldown 1 s after a fire + 300 ms quiet; chops in that window are lost, so a 3rd chop never
+  cancels. Known limit: running that starts from standstill with two hard heel strikes in a
+  row can look like a double chop.
+  Threshold (prefs `chop.threshold`, m/s², 6–20, default 12): Low / Medium / High = 16 / 12 / 8
+  (setting the segmented control writes it), fine slider in Settings. Calibrate (Test screen):
+  3 double chops with the easy threshold 6, then 60 % of the median of the weaker chop of each
+  pair, plus the mean chop axis (optional ±45° cone, switch "Only my chop direction", off).
+  Pocket gate (proximity near ignores chops) is optional and OFF by default; near = value < min(range, 3).
+  Test screen: live motion bar, peak of the last burst vs the trigger line, Diagnostics card
+  (`Diag.kt`: service running, background sample rate, torch state, last gesture / action + error).
+- Non-detection fixes (v1.1): old prefs migrated (`prefs_version` 2 drops `calib.*`, `gesture.shake/chop.*`,
+  resets sensitivity); proximity gate was a hard block and `near = value < maxRange` is wrong on phones
+  whose far value is below max range (everything blocked); shake needed TYPE_GRAVITY events; torch
+  errors were swallowed (now returned, logged, shown); torch camera probing failed as a whole when one
+  camera id threw; wake-up sensors preferred with the screen-off option, no batching; `paused` is a
+  3 s lease so a dead Test screen cannot leave actions off.
 - All detectors are time based (ns timestamps), independent of sensor rate (100 Hz
   requested).
 - `GestureEngine` owns sensors + detectors; `EventsService` (real actions) and

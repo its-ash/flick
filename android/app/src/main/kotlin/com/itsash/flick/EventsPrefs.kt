@@ -20,7 +20,7 @@ enum class Action(val key: String) {
 enum class Gesture(val key: String, val defaultEnabled: Boolean, val defaultAction: Action) {
     PICKUP("pickup", true, Action.WAKE),
     WAVE("wave", false, Action.WAKE),
-    SHAKE("shake", true, Action.FLASHLIGHT),
+    CHOP("chop", true, Action.FLASHLIGHT),
     TWIST("twist", true, Action.CAMERA),
     FLIP("flip", false, Action.DND);
 
@@ -35,6 +35,53 @@ enum class Gesture(val key: String, val defaultEnabled: Boolean, val defaultActi
  */
 class EventsPrefs(context: Context) {
     val prefs: SharedPreferences = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+
+    init {
+        migrate()
+    }
+
+    /**
+     * v2 (chop twice): drops everything the shake / old chop versions saved, so a stale trained
+     * value, disabled gesture or low sensitivity can not keep the flashlight gesture from firing.
+     */
+    private fun migrate() {
+        if (prefs.getInt(KEY_VERSION, 0) >= 2) return
+        prefs.edit().apply {
+            for (k in listOf("calib.shake", "calib.chop", "gesture.shake.enabled", "gesture.shake.action", "gesture.chop.enabled", "gesture.chop.action")) remove(k)
+            putString(KEY_SENSITIVITY, "normal")
+            putFloat(KEY_CHOP_THRESHOLD, ChopDetector.NORMAL)
+            putInt(KEY_VERSION, 2)
+        }.apply()
+    }
+
+    /** Chop trigger level in m/s² (6-20). Low / Normal / High set 16 / 12 / 8; the slider sets any value. */
+    var chopThreshold: Float
+        get() = prefs.getFloat(KEY_CHOP_THRESHOLD, ChopDetector.NORMAL).coerceIn(ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD)
+        set(v) = prefs.edit().putFloat(KEY_CHOP_THRESHOLD, v.coerceIn(ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD)).apply()
+
+    /** Ignore chops while the proximity sensor is covered (pocket). Off by default. */
+    var pocketGate: Boolean
+        get() = prefs.getBoolean(KEY_POCKET, false)
+        set(v) = prefs.edit().putBoolean(KEY_POCKET, v).apply()
+
+    /** Only accept chops near the direction learned in Calibrate. Off by default. */
+    var chopAxisOnly: Boolean
+        get() = prefs.getBoolean(KEY_AXIS_ONLY, false)
+        set(v) = prefs.edit().putBoolean(KEY_AXIS_ONLY, v).apply()
+
+    var chopAxis: FloatArray?
+        get() = if (prefs.contains("chop.ax")) floatArrayOf(prefs.getFloat("chop.ax", 1f), prefs.getFloat("chop.ay", 0f), prefs.getFloat("chop.az", 0f)) else null
+        set(v) = prefs.edit().apply {
+            if (v == null) {
+                remove("chop.ax"); remove("chop.ay"); remove("chop.az")
+            } else {
+                putFloat("chop.ax", v[0]); putFloat("chop.ay", v[1]); putFloat("chop.az", v[2])
+            }
+        }.apply()
+
+    var chopTrained: Boolean
+        get() = prefs.getBoolean("chop.trained", false)
+        set(v) = prefs.edit().putBoolean("chop.trained", v).apply()
 
     var serviceEnabled: Boolean
         get() = prefs.getBoolean(KEY_ENABLED, false)
@@ -62,7 +109,7 @@ class EventsPrefs(context: Context) {
             else -> 1f
         }
 
-    /** Trained trigger strength for [g] (shake: m/s², twist: rad/s), or null when not trained. */
+    /** Trained trigger strength for [g] (twist: rad/s), or null when not trained. */
     fun calibration(g: Gesture): Float? = prefs.getFloat("calib.${g.key}", 0f).takeIf { it > 0f }
 
     fun setCalibration(g: Gesture, value: Float?) {
@@ -91,11 +138,15 @@ class EventsPrefs(context: Context) {
         "screenOff" to screenOff,
         "vibrate" to vibrate,
         "sensitivity" to sensitivity,
+        "chopThreshold" to chopThreshold.toDouble(),
+        "pocketGate" to pocketGate,
+        "chopAxisOnly" to chopAxisOnly,
+        "hasAxis" to (chopAxis != null),
         "gestures" to Gesture.entries.associate {
             it.key to mapOf("enabled" to isEnabled(it), "action" to actionOf(it).key)
         },
         "trained" to mapOf(
-            Gesture.SHAKE.key to (calibration(Gesture.SHAKE) != null),
+            Gesture.CHOP.key to chopTrained,
             Gesture.TWIST.key to (calibration(Gesture.TWIST) != null),
         ),
     )
@@ -107,5 +158,9 @@ class EventsPrefs(context: Context) {
         const val KEY_VIBRATE = "vibrate"
         const val KEY_SENSITIVITY = "sensitivity"
         const val KEY_SAVED_DND = "saved_dnd_filter"
+        const val KEY_VERSION = "prefs_version"
+        const val KEY_CHOP_THRESHOLD = "chop.threshold"
+        const val KEY_POCKET = "chop.pocket_gate"
+        const val KEY_AXIS_ONLY = "chop.axis_only"
     }
 }

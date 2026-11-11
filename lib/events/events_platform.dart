@@ -20,6 +20,10 @@ class EventsConfig {
     required this.sensitivity,
     required this.gestures,
     this.trained = const {},
+    this.chopThreshold = 12,
+    this.pocketGate = false,
+    this.chopAxisOnly = false,
+    this.hasAxis = false,
   });
 
   factory EventsConfig.fromMap(Map<Object?, Object?> map) {
@@ -30,6 +34,10 @@ class EventsConfig {
       screenOff: map['screenOff'] as bool? ?? true,
       vibrate: map['vibrate'] as bool? ?? true,
       sensitivity: map['sensitivity'] as String? ?? 'normal',
+      chopThreshold: (map['chopThreshold'] as num?)?.toDouble() ?? 12,
+      pocketGate: map['pocketGate'] as bool? ?? false,
+      chopAxisOnly: map['chopAxisOnly'] as bool? ?? false,
+      hasAxis: map['hasAxis'] as bool? ?? false,
       trained: {
         for (final e in ((map['trained'] as Map<Object?, Object?>?) ?? const {}).entries)
           if (e.value == true) e.key as String,
@@ -49,9 +57,19 @@ class EventsConfig {
   final bool screenOff;
   final bool vibrate;
   final String sensitivity;
+
+  /// Chop trigger level in m/s² (6-20): Low 16, Normal 12, High 8, or anything between.
+  final double chopThreshold;
+
+  /// Ignore chops while the proximity sensor is covered (off by default).
+  final bool pocketGate;
+
+  /// Only accept chops near the direction learned by Calibrate.
+  final bool chopAxisOnly;
+  final bool hasAxis;
   final Map<GestureKind, GestureSetting> gestures;
 
-  /// Keys of gestures (shake, twist) that have a personal trained strength.
+  /// Keys of gestures (chop, twist) that have a personal trained strength.
   final Set<String> trained;
 
   /// Actions used by the enabled gestures (flip counts as Do Not Disturb).
@@ -98,7 +116,8 @@ class EventsPlatform {
   /// "notifications" | "overlay" | "dnd" | "battery"
   Future<void> openPermission(String name) => _channel.invokeMethod('openPermission', {'name': name});
 
-  Future<void> tryAction(GestureAction a) => _channel.invokeMethod('tryAction', {'action': a.key});
+  /// Runs the action now. Returns null on success or the error text.
+  Future<String?> tryAction(GestureAction a) => _channel.invokeMethod<String>('tryAction', {'action': a.key});
 
   Future<void> startTraining(String gesture) => _channel.invokeMethod('startTraining', {'gesture': gesture});
 

@@ -26,7 +26,8 @@ import io.flutter.plugin.common.MethodChannel
  *   - setGesture({gesture, enabled, action}).
  *   - status() -> {notifications, overlay, dnd, battery, accelerometer, gyroscope, proximity, tileSupported}
  *   - openPermission({name}): "notifications" | "overlay" | "dnd" | "battery".
- *   - tryAction({action}): runs an action now, for the "Try" buttons.
+ *   - tryAction({action}): runs an action now, for the "Try" buttons; returns an error text or null.
+ *   - setOption also takes "chopThreshold" (double, 6-20), "pocketGate" and "chopAxisOnly" (bool).
  *   - addTile() -> asks Android 13+ to add the Quick Settings tile.
  *   - startTraining({gesture}) / stopTraining() / resetTraining({gesture}): personal strength
  *     (only meaningful while the probe stream below is listened to).
@@ -56,7 +57,18 @@ class MainActivity : FlutterActivity() {
                         when (call.argument<String>("key")) {
                             "screenOff" -> prefs.screenOff = call.argument<Boolean>("value") ?: true
                             "vibrate" -> prefs.vibrate = call.argument<Boolean>("value") ?: true
-                            "sensitivity" -> prefs.sensitivity = call.argument<String>("value") ?: "normal"
+                            "sensitivity" -> {
+                                val v = call.argument<String>("value") ?: "normal"
+                                prefs.sensitivity = v
+                                prefs.chopThreshold = ChopDetector.forSensitivity(v)
+                                prefs.chopTrained = false
+                            }
+                            "chopThreshold" -> {
+                                prefs.chopThreshold = (call.argument<Double>("value") ?: ChopDetector.NORMAL.toDouble()).toFloat()
+                                prefs.chopTrained = false
+                            }
+                            "pocketGate" -> prefs.pocketGate = call.argument<Boolean>("value") ?: false
+                            "chopAxisOnly" -> prefs.chopAxisOnly = call.argument<Boolean>("value") ?: false
                         }
                         result.success(null)
                     }
@@ -78,9 +90,10 @@ class MainActivity : FlutterActivity() {
                         val action = Action.of(call.argument<String>("action"))
                         if (action != null) {
                             val r = runner ?: ActionRunner(applicationContext).also { runner = it }
-                            r.run(action)
+                            result.success(r.run(action))
+                        } else {
+                            result.success(null)
                         }
-                        result.success(null)
                     }
                     "startTraining" -> {
                         Gesture.of(call.argument<String>("gesture"))?.let { probe.startTraining(it) }
@@ -91,7 +104,8 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "resetTraining" -> {
-                        Gesture.of(call.argument<String>("gesture"))?.let { prefs.setCalibration(it, null) }
+                        val g = Gesture.of(call.argument<String>("gesture"))
+                        if (g == Gesture.CHOP) probe.resetChop() else if (g != null) prefs.setCalibration(g, null)
                         probe.stopTraining() // re-applies thresholds
                         result.success(null)
                     }
