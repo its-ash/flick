@@ -10,7 +10,7 @@ user picked. Flutter is only the settings UI.
 |---|---|---|---|
 | Pick up | accelerometer (gravity) | wake screen | only while the screen is off; phone must rest flat ≥ 1 s first |
 | Wave over | proximity (wake-up variant if present) | wake screen | only while the screen is off; near 80–1000 ms |
-| Chop twice | linear acceleration (fallback: accelerometer + filter) | flashlight | two push-then-stop chops 150–900 ms apart, any direction; adaptive threshold |
+| Shake side to side | linear acceleration (fallback: accelerometer + filter), gravity, proximity | flashlight | 5 swings (4 direction reversals, L-R-L-R-L), each ≤ 450 ms after the previous, any size, any orientation |
 | Twist twice | gyroscope X/Y (any orientation) | camera | 3 alternating peaks (out, back, out) within 1.6 s; adaptive threshold |
 | Flip | accelerometer (gravity z) | Do Not Disturb (fixed) | face down 1.5 s → DND on; face up → previous mode back |
 
@@ -21,27 +21,37 @@ low / normal / high scales thresholds ×1.3 / ×1 / ×0.75.
 
 - Threshold = max(floor × sensitivity, K × recent motion RMS) (`NoiseTracker`):
   walking raises it, rest lowers it back. Floor = built-in default or the user's
-  trained value (prefs `calib.chop` / `calib.twist`, set by Train = 3 gestures,
-  65 % of the median peak, `Calibration`).
-- Chop = strong push then opposite-sign stop within 20–250 ms, checked on 9
-  directions. The first chop must be isolated; a third push within 250 ms of the
-  second cancels (shaking). Fired chops do not block the next series; the next first
-  chop may come 600 ms after a fire. Slow rhythmic chopping (period > ~300 ms) can
-  still fire once at its start.
+  trained value (prefs `calib.shake` / `calib.twist`, set by Train = 3 gestures,
+  65 % of the median peak, `Calibration`; shake uses 40 % and a max floor of 3 m/s²
+  so small swings keep working). Shake uses K = 5 and a 4 s tracker, no other K.
+- Shake (`ShakeDetector`, replaced the old double-chop, which is removed; the
+  gesture key is now `shake`, old `chop` prefs are ignored): gravity-aligned part of
+  the linear acceleration is removed, the rest is projected on the principal axis
+  of recent motion (covariance, tau 0.6 s), so portrait/landscape/tilted all work.
+  Each acceleration lobe over the threshold with the opposite sign of the last one
+  is a swing; `reversals + 1` swings (default 4 reversals = 5, configurable 4–5 via
+  `ShakeDetector.reversals`) fire. Gap between swings 50–450 ms (a longer pause
+  resets: must be continuous); mean half-period 60–400 ms (~1.2–8 Hz). Rejected
+  when vertical (gravity-aligned) RMS > 0.7 × lateral RMS (walking, jogging, up-down
+  shaking) and while proximity is near (pocket/bag). Size does not matter beyond the
+  low floor (default 1.5 m/s², 0.8–3). After a fire it is locked until the motion
+  has stopped 500 ms and ≥ 700 ms passed, so one long shake toggles once. The torch
+  toggle itself is `ActionRunner` (TorchCallback state). Test screen shows motion
+  meter + "Swings n of 5"; Train works as for twist.
 - All detectors are time based (ns timestamps), independent of sensor rate (100 Hz
   requested).
 - `GestureEngine` owns sensors + detectors; `EventsService` (real actions) and
   `GestureProbe` (Test screen) both use it. Sensors are re-registered only when
   the needed sensor set changes.
 - Own vibration (distinct pattern per gesture, `GestureEngine.PATTERNS`) mutes
-  chop/twist for its length + 250 ms so it never feeds back into detection.
+  shake/twist for its length + 250 ms so it never feeds back into detection.
 - Torch state comes from `CameraManager.TorchCallback` (`ActionRunner`), never a
   local flag.
 - Test gestures screen (`lib/screens/test_screen.dart`, from Settings): live meter
   via EventChannel `com.itsash.flick/probe`, Train / Reset per gesture; while open
   `EventsService.paused` is true (no actions run).
 
-### Root cause of "second chop fails after the flashlight turns on"
+### History: root cause of "second chop fails after the flashlight turns on" (chop since removed)
 Old `ChopDetector`: 1.5 s cooldown after a fire; raw accelerometer high-pass with
 alpha 0.8 (~80 ms time constant, swallowed soft chops); every spike counted (a chop
 is an accelerate + brake pair, so a double chop is 4 spikes, matched only by a

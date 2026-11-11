@@ -59,7 +59,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Listens to motion sensors for user-configured gestures (chop for flashlight, twist for camera, pick up to wake) while the app is closed."/>
+                android:value="Listens to motion sensors for user-configured gestures (shake for flashlight, twist for camera, pick up to wake) while the app is closed."/>
         </service>
 
         <receiver

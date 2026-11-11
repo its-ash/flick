@@ -18,7 +18,6 @@ class FlickApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return UiApp(
       title: 'Flick',
-      themeMode: ThemeMode.system,
       home: HomeScreen(store: store),
     );
   }

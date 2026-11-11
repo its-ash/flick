@@ -42,7 +42,7 @@ class SettingsScreen extends StatelessWidget {
               UiListGroup(
                 header: 'Background',
                 footer:
-                    'Android pauses motion sensors when the screen is off. Keeping them awake lets Chop and Twist '
+                    'Android pauses motion sensors when the screen is off. Keeping them awake lets Shake and Twist '
                     'work with the screen off, at some battery cost.',
                 children: [
                   UiSwitchTile(
@@ -72,7 +72,7 @@ class SettingsScreen extends StatelessWidget {
               ),
               UiListGroup(
                 header: 'Gestures',
-                footer: 'See a live motion meter, and teach Flick how hard you chop and twist.',
+                footer: 'See a live motion meter, and teach Flick how hard you shake and twist.',
                 children: [
                   UiListTile(
                     'Test gestures',
@@ -93,6 +93,7 @@ class SettingsScreen extends StatelessWidget {
                     UiListTile(a.label, icon: a.icon, onTap: () => store.platform.tryAction(a)),
                 ],
               ),
+              const UiAppearanceSection(),
               const UiUpdateSection(storeId: 'flick'),
               const UiDeveloperSection(),
             ],

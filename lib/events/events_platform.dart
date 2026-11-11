@@ -51,7 +51,7 @@ class EventsConfig {
   final String sensitivity;
   final Map<GestureKind, GestureSetting> gestures;
 
-  /// Keys of gestures (chop, twist) that have a personal trained strength.
+  /// Keys of gestures (shake, twist) that have a personal trained strength.
   final Set<String> trained;
 
   /// Actions used by the enabled gestures (flip counts as Do Not Disturb).

@@ -9,7 +9,7 @@ import io.flutter.plugin.common.EventChannel
  * Live feed for the "Test gestures" screen (EventChannel com.itsash.flick/probe).
  * While it runs, EventsService.paused is set so the real actions do not fire.
  *
- * Events (maps): {type: "frame", chop, chopThr, twist, twistThr} every 50 ms;
+ * Events (maps): {type: "frame", shake, shakeThr, swings, swingsNeeded, twist, twistThr} every 50 ms;
  * {type: "gesture", gesture}; {type: "rep", gesture, n}; {type: "trained", gesture, value}.
  */
 class GestureProbe(context: Context) : EventChannel.StreamHandler, GestureEngine.Listener {
@@ -26,8 +26,10 @@ class GestureProbe(context: Context) : EventChannel.StreamHandler, GestureEngine
             sink?.success(
                 mapOf(
                     "type" to "frame",
-                    "chop" to engine.chop.level.toDouble(),
-                    "chopThr" to engine.chop.threshold.toDouble(),
+                    "shake" to engine.shake.level.toDouble(),
+                    "shakeThr" to engine.shake.threshold.toDouble(),
+                    "swings" to engine.shake.swings,
+                    "swingsNeeded" to engine.shake.swingsNeeded,
                     "twist" to engine.twist.level.toDouble(),
                     "twistThr" to engine.twist.threshold.toDouble(),
                 ),
@@ -39,7 +41,7 @@ class GestureProbe(context: Context) : EventChannel.StreamHandler, GestureEngine
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         sink = events
         EventsService.paused = true
-        engine.configure(setOf(Gesture.CHOP, Gesture.TWIST))
+        engine.configure(setOf(Gesture.SHAKE, Gesture.TWIST))
         main.post(tick)
     }
 
@@ -54,7 +56,7 @@ class GestureProbe(context: Context) : EventChannel.StreamHandler, GestureEngine
     }
 
     fun startTraining(g: Gesture) {
-        if (g != Gesture.CHOP && g != Gesture.TWIST) return
+        if (g != Gesture.SHAKE && g != Gesture.TWIST) return
         training = g
         peaks.clear()
         engine.training = g
@@ -73,11 +75,11 @@ class GestureProbe(context: Context) : EventChannel.StreamHandler, GestureEngine
             sink?.success(mapOf("type" to "gesture", "gesture" to gesture.key))
             return
         }
-        peaks.add(if (t == Gesture.CHOP) engine.chop.lastPeak else engine.twist.lastPeak)
+        peaks.add(if (t == Gesture.SHAKE) engine.shake.lastPeak else engine.twist.lastPeak)
         sink?.success(mapOf("type" to "rep", "gesture" to t.key, "n" to peaks.size))
         if (peaks.size >= REPS) {
-            val value = if (t == Gesture.CHOP) {
-                Calibration.threshold(peaks, ChopDetector.MIN_BASE, ChopDetector.MAX_BASE)
+            val value = if (t == Gesture.SHAKE) {
+                Calibration.threshold(peaks, ShakeDetector.MIN_BASE, ShakeDetector.MAX_BASE, ShakeDetector.TRAIN_FRACTION)
             } else {
                 Calibration.threshold(peaks, TwistDetector.MIN_BASE, TwistDetector.MAX_BASE)
             }

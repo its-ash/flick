@@ -1,12 +1,12 @@
 # Flick
 
-Phone gestures that work in the background: chop for light, twist for camera.
+Phone gestures that work in the background: shake for light, twist for camera.
 
 **[Website](https://flick.itsash.in)** · **[Download APK](https://github.com/its-ash/flick/releases/latest/download/flick.apk)** · Get it in **[Ash Store](https://store.itsash.in)**
 
 ## Features
 
-- **Chop twice**: flashlight on / off.
+- **Shake side to side**: flashlight on / off (left, right, left, right, left; small or big, but continuous).
 - **Twist twice**: open the camera (also from the lock screen).
 - **Pick up** or **wave over** the phone while the screen is off: light up the screen.
 - **Flip face down**: Do Not Disturb until you turn it back over.

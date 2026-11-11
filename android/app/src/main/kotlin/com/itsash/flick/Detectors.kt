@@ -80,196 +80,194 @@ object Calibration {
         return if (s.size % 2 == 1) s[s.size / 2] else (s[s.size / 2 - 1] + s[s.size / 2]) / 2f
     }
 
-    /** About 65% of the median peak, kept inside [[min], [max]]. Null when there are no peaks. */
-    fun threshold(peaks: List<Float>, min: Float, max: Float): Float? =
-        if (peaks.isEmpty()) null else (median(peaks) * FRACTION).coerceIn(min, max)
+    /** About 65% (or [fraction]) of the median peak, kept inside [[min], [max]]. Null when there are no peaks. */
+    fun threshold(peaks: List<Float>, min: Float, max: Float, fraction: Float = FRACTION): Float? =
+        if (peaks.isEmpty()) null else (median(peaks) * fraction).coerceIn(min, max)
 }
 
 /**
- * Chop twice. One chop is a strong push along one direction followed within 20-250 ms
- * by an opposite-sign stop (checked on 9 directions: 3 axes and 6 diagonals, so a
- * tilted hand works too). Two chops 150-900 ms apart fire, after a short confirm
- * window that rejects continuous shaking. The input is linear acceleration (m/s², no
- * gravity).
+ * Shake side to side: a continuous series of direction reversals, any size.
  *
- * Rules that keep it natural and safe:
- * - the first chop must be isolated (no other chop within 900 ms before it), so
- *   shaking never fires; a third push inside the confirm window cancels as well;
- * - chops that already fired do not count towards that isolation and the next first
- *   chop may come 600 ms after the last fire, so toggling the flashlight again about
- *   a second later works every time;
- * - samples are ignored while [mute] is active (our own vibration).
+ * Input is linear acceleration (m/s², no gravity) plus the gravity direction
+ * ([setGravity]). The gravity-aligned part is removed, the rest is projected on the
+ * principal axis of the recent motion (a slowly updated covariance, so it works in
+ * portrait, landscape or tilted). Every acceleration lobe on that axis that crosses the
+ * threshold with the opposite sign of the one before is one swing (one per end point of
+ * L, R, L, ...). [reversals] + 1 swings (default 4 reversals = 5 swings) fire, when:
+ * - each swing follows the previous one within 450 ms (any longer pause resets the
+ *   count, so the motion must be continuous) and not sooner than 50 ms (jitter);
+ * - the mean time between swings is 60-400 ms (about 1.2-8 Hz, a hand shake);
+ * - the vertical (gravity-aligned) motion is below 0.7 x the lateral motion, which
+ *   rejects walking and jogging (rhythmic, mainly vertical motion);
+ * - [blocked] is false (proximity near: pocket or bag).
+ * The size of the swings does not matter beyond the low threshold, which is
+ * max(floor x sensitivity, 5 x the slow motion level), so a resting phone or a tremor
+ * does not count. After a fire the detector stays locked until the motion has stopped
+ * for 500 ms and 700 ms have passed, so one long shake toggles once.
  */
-class ChopDetector(var scale: Float = 1f, var base: Float = DEFAULT_BASE) {
+class ShakeDetector(var scale: Float = 1f, var base: Float = DEFAULT_BASE, reversals: Int = 4) {
     companion object {
-        const val DEFAULT_BASE = 8f
-        const val MIN_BASE = 4f
-        const val MAX_BASE = 20f
-        const val TRAIN_BASE = 4f
-        const val NOISE_K = 3f
-        private const val MIN_CHOP_GAP = 150 * MS
-        private const val MAX_CHOP_GAP = 900 * MS
-        private const val CONFIRM = 250 * MS
-        private const val AFTER_FIRE = 600 * MS
-        private const val ISOLATION = 900 * MS
-        private const val MAX_RUN = 300 * MS
-        private const val MIN_BRAKE = 20 * MS
-        private const val MAX_BRAKE = 250 * MS
-        private const val SETTLE_MAX = 400 * MS
-        private const val H = 0.70710678f
-        private val DIRS = arrayOf(
-            floatArrayOf(1f, 0f, 0f), floatArrayOf(0f, 1f, 0f), floatArrayOf(0f, 0f, 1f),
-            floatArrayOf(H, H, 0f), floatArrayOf(H, -H, 0f),
-            floatArrayOf(H, 0f, H), floatArrayOf(H, 0f, -H),
-            floatArrayOf(0f, H, H), floatArrayOf(0f, H, -H),
-        )
+        const val DEFAULT_BASE = 1.5f
+        const val MIN_BASE = 0.8f
+        const val MAX_BASE = 3f
+        const val TRAIN_BASE = 0.8f
+
+        /** Training learns 40% of the typical swing, so small swings still work afterwards. */
+        const val TRAIN_FRACTION = 0.4f
+        const val NOISE_K = 5f
+        const val VERTICAL_RATIO = 0.7f
+        private const val MAX_GAP = 450 * MS
+        private const val MIN_GAP = 50 * MS
+        private const val MIN_HALF = 60 * MS
+        private const val MAX_HALF = 400 * MS
+        private const val AFTER_FIRE = 700 * MS
+        private const val CALM = 500 * MS
+        private const val TAU_AXIS = 0.6f
+        private const val TAU_ENERGY = 0.8f
     }
 
-    private class Chop(val t: Long, val peak: Float) {
-        var consumed = false
-    }
-
-    private class Pending(val first: Chop, val second: Chop, val fireAt: Long)
-
-    private class Axis {
-        var state = IDLE
-        var sign = 0
-        var runStart = 0L
-        var peak = 0f
-        var peakT = 0L
-        var pushSign = 0
-        var pushPeak = 0f
-        var pushT = 0L
-        var settleSince = 0L
-
-        fun settle(t: Long) { state = SETTLE; settleSince = t }
-        fun reset() { state = IDLE }
-        fun pushing(thr: Float) = state == RUN && peak >= 0.8f * thr
-
-        /** Returns the push peak when a push + stop completed on this sample, else -1. */
-        fun step(t: Long, u: Float, thr: Float): Float {
-            val low = 0.35f * thr
-            val s = if (u >= low) 1 else if (u <= -low) -1 else 0
-            while (true) {
-                when (state) {
-                    IDLE -> {
-                        if (s != 0) { state = RUN; sign = s; runStart = t; peak = abs(u); peakT = t }
-                        return -1f
-                    }
-                    RUN -> {
-                        if (s == sign) {
-                            if (abs(u) > peak) { peak = abs(u); peakT = t }
-                            if (t - runStart > MAX_RUN) settle(t)
-                            return -1f
-                        }
-                        if (peak >= thr) {
-                            state = BRAKE; pushSign = sign; pushPeak = peak; pushT = peakT
-                        } else {
-                            state = IDLE
-                        }
-                    }
-                    BRAKE -> {
-                        if (t - pushT > MAX_BRAKE) { state = IDLE; continue }
-                        if (s == pushSign) {
-                            if (abs(u) > pushPeak) { pushPeak = abs(u); pushT = t }
-                            return -1f
-                        }
-                        if (s == -pushSign && abs(u) >= 0.5f * thr && t - pushT >= MIN_BRAKE) {
-                            settle(t)
-                            return pushPeak
-                        }
-                        return -1f
-                    }
-                    else -> {
-                        if (s == 0 || t - settleSince > SETTLE_MAX) state = IDLE
-                        return -1f
-                    }
-                }
-            }
+    /** Direction reversals needed (4 or 5); swings = reversals + 1. */
+    var reversals: Int = reversals.coerceIn(4, 5)
+        set(v) {
+            field = v.coerceIn(4, 5)
         }
 
-        private companion object {
-            const val IDLE = 0
-            const val RUN = 1
-            const val BRAKE = 2
-            const val SETTLE = 3
-        }
-    }
+    val swingsNeeded: Int get() = reversals + 1
 
-    private val noise = NoiseTracker(capFloor = 4f)
-    private val axes = Array(DIRS.size) { Axis() }
-    private val chops = ArrayList<Chop>()
-    private var pending: Pending? = null
-    private var lastFireT = NEVER
+    /** Set while the phone is covered (proximity near): pocket, bag. */
+    var blocked = false
+
+    private val noise = NoiseTracker(tau = 4f, capFloor = 0.4f)
+    private var gx = 0f
+    private var gy = 0f
+    private var gz = 0f
+    private var gravityOk = false
+    private val cov = FloatArray(6) // xx yy zz xy xz yz
+    private var ux = 1f
+    private var uy = 0f
+    private var uz = 0f
+    private var pE = 0f
+    private var vE = 0f
+    private var last = -1L
+
+    private val times = ArrayList<Long>()
+    private val peaks = ArrayList<Float>()
+    private var curSign = 0
+    private var locked = false
+    private var fireT = NEVER
+    private var lastActive = NEVER
     private var muteUntil = Long.MIN_VALUE
 
-    /** Current motion magnitude (m/s²), for the live meter. */
+    /** Current lateral motion |p| (m/s²), for the live meter. */
     var level = 0f
         private set
 
-    /** Weakest push of the two chops that fired last, for training. */
+    /** Swings counted in the current series, for the live meter. */
+    val swings: Int get() = times.size
+
+    /** Mean peak of the swings of the series that fired last, for training. */
     var lastPeak = 0f
         private set
 
-    /** Current trigger level (m/s²): max(floor x sensitivity, K x recent motion). */
+    /** Current trigger level (m/s²): max(floor x sensitivity, K x slow motion level). */
     val threshold: Float
         get() = max((base * scale).coerceIn(MIN_BASE, MAX_BASE), NOISE_K * noise.rms)
 
-    /** Ignore samples until this timestamp (ns), e.g. while our own vibration runs. */
+    fun setGravity(x: Float, y: Float, z: Float) {
+        val n = sqrt(x * x + y * y + z * z)
+        gravityOk = n > 5f
+        if (gravityOk) {
+            gx = x / n; gy = y / n; gz = z / n
+        }
+    }
+
     fun mute(untilNs: Long) {
         muteUntil = untilNs
-        pending = null
+        resetSeries()
+    }
+
+    private fun resetSeries() {
+        times.clear(); peaks.clear(); curSign = 0
     }
 
     fun add(t: Long, x: Float, y: Float, z: Float): Boolean {
-        level = sqrt(x * x + y * y + z * z)
-        if (t < muteUntil) {
-            for (a in axes) a.reset()
+        if (t < muteUntil || blocked || !gravityOk) {
+            level = 0f
+            resetSeries()
             return false
         }
-        noise.update(t, level)
-        val thr = threshold
-
-        pending?.let { p ->
-            if (axes.any { it.pushing(thr) }) {
-                pending = null // more pushes: this is shaking, not a double chop
-            } else if (t >= p.fireAt) {
-                pending = null
-                p.first.consumed = true
-                p.second.consumed = true
-                lastFireT = p.second.t
-                lastPeak = min(p.first.peak, p.second.peak)
-                for (a in axes) a.reset()
-                return true
+        val dt = if (last < 0) 0.01f else ((t - last) / 1e9f).coerceIn(0.001f, 0.2f)
+        last = t
+        val v = x * gx + y * gy + z * gz
+        val hx = x - v * gx
+        val hy = y - v * gy
+        val hz = z - v * gz
+        val a = dt / TAU_AXIS
+        cov[0] += (hx * hx - cov[0]) * a
+        cov[1] += (hy * hy - cov[1]) * a
+        cov[2] += (hz * hz - cov[2]) * a
+        cov[3] += (hx * hy - cov[3]) * a
+        cov[4] += (hx * hz - cov[4]) * a
+        cov[5] += (hy * hz - cov[5]) * a
+        repeat(2) {
+            val wx = cov[0] * ux + cov[3] * uy + cov[4] * uz
+            val wy = cov[3] * ux + cov[1] * uy + cov[5] * uz
+            val wz = cov[4] * ux + cov[5] * uy + cov[2] * uz
+            val n = sqrt(wx * wx + wy * wy + wz * wz)
+            if (n > 1e-9f) {
+                ux = wx / n; uy = wy / n; uz = wz / n
+            } else {
+                val hn = sqrt(hx * hx + hy * hy + hz * hz)
+                if (hn > 1e-3f) {
+                    ux = hx / hn; uy = hy / hn; uz = hz / hn
+                }
             }
         }
+        val p = ux * hx + uy * hy + uz * hz
+        val e = dt / TAU_ENERGY
+        pE += (p * p - pE) * e
+        vE += (v * v - vE) * e
+        level = abs(p)
+        if (!locked) noise.update(t, sqrt(x * x + y * y + z * z))
+        val thr = threshold
 
-        var found = -1f
-        for (i in axes.indices) {
-            val d = DIRS[i]
-            val r = axes[i].step(t, d[0] * x + d[1] * y + d[2] * z, thr)
-            if (r > found) found = r
+        if (locked) {
+            if (level >= thr) lastActive = t
+            if (t - lastActive >= CALM && t - fireT >= AFTER_FIRE) {
+                locked = false
+                resetSeries()
+            }
+            return false
         }
-        if (found >= 0f) {
-            for (a in axes) a.settle(t)
-            onChop(t, found)
-        }
-        return false
-    }
 
-    private fun onChop(t: Long, peak: Float) {
-        val prev = chops.lastOrNull()
-        if (prev != null && t - prev.t < MIN_CHOP_GAP) return // same chop seen on another direction
-        pending = null // a further chop while waiting: shaking
-        chops.removeAll { t - it.t > 3000 * MS }
-        val chop = Chop(t, peak)
-        chops.add(chop)
-        if (prev == null || prev.consumed || chops.size < 2) return
-        val gap = t - prev.t
-        val isolated = chops.none { it !== prev && it !== chop && !it.consumed && it.t < prev.t && prev.t - it.t < ISOLATION }
-        if (gap in MIN_CHOP_GAP..MAX_CHOP_GAP && prev.t - lastFireT >= AFTER_FIRE && isolated) {
-            pending = Pending(prev, chop, t + CONFIRM)
+        if (times.isNotEmpty() && t - times.last() > MAX_GAP) resetSeries()
+        val s = if (p >= thr) 1 else if (p <= -thr) -1 else 0
+        if (s == 0) return false
+        if (s == curSign) {
+            if (level > peaks.last()) peaks[peaks.size - 1] = level
+            return false
         }
+        if (times.isNotEmpty() && t - times.last() < MIN_GAP) resetSeries() // jitter
+        if (sqrt(vE) > VERTICAL_RATIO * sqrt(pE)) { // walking, jogging: mostly vertical
+            resetSeries()
+            return false
+        }
+        curSign = s
+        times.add(t)
+        peaks.add(level)
+        val need = swingsNeeded
+        if (times.size > need) {
+            times.removeAt(0); peaks.removeAt(0)
+        }
+        if (times.size < need) return false
+        val half = (t - times[0]) / (need - 1)
+        if (half !in MIN_HALF..MAX_HALF) return false
+        lastPeak = peaks.subList(0, need - 1).average().toFloat()
+        resetSeries()
+        locked = true
+        fireT = t
+        lastActive = t
+        return true
     }
 }
 

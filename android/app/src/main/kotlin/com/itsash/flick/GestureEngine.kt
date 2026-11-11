@@ -14,8 +14,9 @@ import android.os.Vibrator
  * and GestureProbe (test / train screen), so both behave exactly the same.
  *
  * Input choice (steadier than raw accelerometer data):
- * - chop: TYPE_LINEAR_ACCELERATION (gravity already removed by the platform fusion),
- *   else raw accelerometer through [GravityFilter];
+ * - shake: TYPE_LINEAR_ACCELERATION (gravity already removed by the platform fusion),
+ *   else raw accelerometer through [GravityFilter]; plus the gravity direction and the
+ *   proximity sensor (near = pocket / bag, the shake is ignored);
  * - pickup / flip: TYPE_GRAVITY, else the same filter's gravity;
  * - twist: gyroscope (all 3 axes).
  * Sensors are only re-registered when the set of needed sensors changes, so editing a
@@ -35,7 +36,7 @@ class GestureEngine(
     private val sensors = context.getSystemService(SensorManager::class.java)
     private val vibrator = context.getSystemService(Vibrator::class.java)
 
-    val chop = ChopDetector()
+    val shake = ShakeDetector()
     val twist = TwistDetector()
     private val pickup = PickupDetector()
     private val wave = WaveDetector()
@@ -44,7 +45,7 @@ class GestureEngine(
 
     private var enabled: Set<Gesture> = emptySet()
     private var registered: Set<Int> = emptySet()
-    private var accelForChop = false
+    private var accelForShake = false
     private var accelForPose = false
     private var proximityRange = 5f
 
@@ -59,18 +60,18 @@ class GestureEngine(
     fun configure(gestures: Set<Gesture>) {
         enabled = gestures
         applyTuning()
-        val needChop = Gesture.CHOP in gestures
-        val needPose = Gesture.PICKUP in gestures || Gesture.FLIP in gestures
+        val needShake = Gesture.SHAKE in gestures
+        val needPose = Gesture.PICKUP in gestures || Gesture.FLIP in gestures || needShake
         val linear = sensors.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
         val gravity = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY)
-        accelForChop = needChop && linear == null
+        accelForShake = needShake && linear == null
         accelForPose = needPose && gravity == null
         val want = buildSet {
-            if (needChop && linear != null) add(Sensor.TYPE_LINEAR_ACCELERATION)
+            if (needShake && linear != null) add(Sensor.TYPE_LINEAR_ACCELERATION)
             if (needPose && gravity != null) add(Sensor.TYPE_GRAVITY)
-            if (accelForChop || accelForPose) add(Sensor.TYPE_ACCELEROMETER)
+            if (accelForShake || accelForPose) add(Sensor.TYPE_ACCELEROMETER)
             if (Gesture.TWIST in gestures) add(Sensor.TYPE_GYROSCOPE)
-            if (Gesture.WAVE in gestures) add(Sensor.TYPE_PROXIMITY)
+            if (Gesture.WAVE in gestures || needShake) add(Sensor.TYPE_PROXIMITY)
         }
         if (want == registered) return
         sensors.unregisterListener(this)
@@ -99,17 +100,17 @@ class GestureEngine(
     private fun applyTuning() {
         val scale = prefs.scale
         val t = training
-        chop.scale = if (t == Gesture.CHOP) 1f else scale
-        chop.base = if (t == Gesture.CHOP) ChopDetector.TRAIN_BASE else prefs.calibration(Gesture.CHOP) ?: ChopDetector.DEFAULT_BASE
+        shake.scale = if (t == Gesture.SHAKE) 1f else scale
+        shake.base = if (t == Gesture.SHAKE) ShakeDetector.TRAIN_BASE else prefs.calibration(Gesture.SHAKE) ?: ShakeDetector.DEFAULT_BASE
         twist.scale = if (t == Gesture.TWIST) 1f else scale
         twist.base = if (t == Gesture.TWIST) TwistDetector.TRAIN_BASE else prefs.calibration(Gesture.TWIST) ?: TwistDetector.DEFAULT_BASE
         pickup.scale = scale
     }
 
-    /** Ignores chop / twist input for [ms], e.g. while our own vibration shakes the phone. */
+    /** Ignores shake / twist input for [ms], e.g. while our own vibration shakes the phone. */
     fun mute(ms: Long) {
         val until = SystemClock.elapsedRealtimeNanos() + ms * 1_000_000L
-        chop.mute(until)
+        shake.mute(until)
         twist.mute(until)
     }
 
@@ -126,27 +127,30 @@ class GestureEngine(
         val t = event.timestamp
         val v = event.values
         when (event.sensor.type) {
-            Sensor.TYPE_LINEAR_ACCELERATION -> feedChop(t, v[0], v[1], v[2])
+            Sensor.TYPE_LINEAR_ACCELERATION -> feedShake(t, v[0], v[1], v[2])
             Sensor.TYPE_GRAVITY -> feedPose(t, v[0], v[1], v[2])
             Sensor.TYPE_ACCELEROMETER -> {
                 filter.update(t, v[0], v[1], v[2])
-                if (accelForChop) feedChop(t, filter.linear[0], filter.linear[1], filter.linear[2])
+                if (accelForShake) feedShake(t, filter.linear[0], filter.linear[1], filter.linear[2])
                 if (accelForPose) feedPose(t, filter.gravity[0], filter.gravity[1], filter.gravity[2])
             }
             Sensor.TYPE_GYROSCOPE -> if (Gesture.TWIST in enabled && twist.add(t, v[0], v[1], v[2])) {
                 listener.onGesture(Gesture.TWIST)
             }
-            Sensor.TYPE_PROXIMITY -> if (Gesture.WAVE in enabled && wave.add(t, v[0] < proximityRange)) {
-                listener.onGesture(Gesture.WAVE)
+            Sensor.TYPE_PROXIMITY -> {
+                val near = v[0] < proximityRange
+                shake.blocked = near
+                if (Gesture.WAVE in enabled && wave.add(t, near)) listener.onGesture(Gesture.WAVE)
             }
         }
     }
 
-    private fun feedChop(t: Long, x: Float, y: Float, z: Float) {
-        if (Gesture.CHOP in enabled && chop.add(t, x, y, z)) listener.onGesture(Gesture.CHOP)
+    private fun feedShake(t: Long, x: Float, y: Float, z: Float) {
+        if (Gesture.SHAKE in enabled && shake.add(t, x, y, z)) listener.onGesture(Gesture.SHAKE)
     }
 
     private fun feedPose(t: Long, x: Float, y: Float, z: Float) {
+        shake.setGravity(x, y, z)
         if (Gesture.PICKUP in enabled && pickup.add(t, x, y, z)) listener.onGesture(Gesture.PICKUP)
         if (Gesture.FLIP in enabled) flip.add(t, z)?.let { listener.onFlip(it) }
     }
@@ -154,7 +158,7 @@ class GestureEngine(
     companion object {
         /** Distinct feel per gesture: off/on durations in ms, starting with a pause. */
         val PATTERNS: Map<Gesture, LongArray> = mapOf(
-            Gesture.CHOP to longArrayOf(0, 30, 70, 30), // tick-tick
+            Gesture.SHAKE to longArrayOf(0, 30, 70, 30), // tick-tick
             Gesture.TWIST to longArrayOf(0, 70), // one firm pulse
             Gesture.PICKUP to longArrayOf(0, 20), // light tap
             Gesture.WAVE to longArrayOf(0, 20),

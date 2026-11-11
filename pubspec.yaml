@@ -1,7 +1,7 @@
 name: flick
 description: "Flick: gestures that run in the background. Chop for the flashlight, twist for the camera, pick up to wake."
 publish_to: 'none'
-version: 1.0.2+3
+version: 1.0.3+4
 
 environment:
   sdk: ^3.12.2

@@ -5,7 +5,7 @@ import 'package:theme/theme.dart';
 
 import '../events/events_store.dart';
 
-/// Live motion meters for Chop and Twist, a log of detected gestures, and the
+/// Live motion meters for Shake (with swing count) and Twist, a log of detected gestures, and the
 /// optional "Train" flow (do the gesture 3 times, Flick learns your strength).
 /// Real actions are paused while this screen is open.
 class TestScreen extends StatefulWidget {
@@ -19,9 +19,10 @@ class TestScreen extends StatefulWidget {
 
 class _TestScreenState extends State<TestScreen> {
   StreamSubscription<Map<Object?, Object?>>? _sub;
-  double _chop = 0, _chopThr = 8, _twist = 0, _twistThr = 4.5;
+  double _shake = 0, _shakeThr = 1.5, _twist = 0, _twistThr = 4.5;
+  int _swings = 0, _swingsNeeded = 5;
   final List<String> _log = [];
-  String? _training; // 'chop' | 'twist'
+  String? _training; // 'shake' | 'twist'
   int _reps = 0;
 
   EventsStore get store => widget.store;
@@ -44,13 +45,15 @@ class _TestScreenState extends State<TestScreen> {
     switch (e['type']) {
       case 'frame':
         setState(() {
-          _chop = (e['chop'] as num).toDouble();
-          _chopThr = (e['chopThr'] as num).toDouble();
+          _shake = (e['shake'] as num).toDouble();
+          _shakeThr = (e['shakeThr'] as num).toDouble();
+          _swings = e['swings'] as int;
+          _swingsNeeded = e['swingsNeeded'] as int;
           _twist = (e['twist'] as num).toDouble();
           _twistThr = (e['twistThr'] as num).toDouble();
         });
       case 'gesture':
-        setState(() => _log.insert(0, e['gesture'] == 'chop' ? 'Chop twice detected' : 'Twist twice detected'));
+        setState(() => _log.insert(0, e['gesture'] == 'shake' ? 'Side-to-side shake detected' : 'Twist twice detected'));
         if (_log.length > 5) _log.removeLast();
       case 'rep':
         setState(() => _reps = e['n'] as int);
@@ -85,7 +88,7 @@ class _TestScreenState extends State<TestScreen> {
     await store.load();
   }
 
-  Widget _meter(String title, String gesture, double level, double thr, String unit) {
+  Widget _meter(String title, String gesture, double level, double thr, String unit, {int? swings, int? swingsNeeded}) {
     final trained = store.config?.trained.contains(gesture) ?? false;
     final training = _training == gesture;
     final max = thr * 2.5;
@@ -107,6 +110,13 @@ class _TestScreenState extends State<TestScreen> {
             label: 'Motion',
             height: 10,
           ),
+          if (swings != null && swingsNeeded != null)
+            UiProgressBar(
+              (swings / swingsNeeded).clamp(0.0, 1.0),
+              status: swings >= swingsNeeded ? UiStatus.success : UiStatus.accent,
+              label: 'Swings $swings of $swingsNeeded',
+              height: 10,
+            ),
           UiRow(
             gap: UiSpace.sm,
             children: [
@@ -143,7 +153,15 @@ class _TestScreenState extends State<TestScreen> {
               'Actions are paused while this screen is open. Try a gesture and watch the meter.',
               icon: Icons.science_rounded,
             ),
-            _meter('Chop twice', 'chop', _chop, _chopThr, 'm/s²'),
+            _meter(
+              'Shake side to side',
+              'shake',
+              _shake,
+              _shakeThr,
+              'm/s²',
+              swings: _swings,
+              swingsNeeded: _swingsNeeded,
+            ),
             _meter('Twist twice', 'twist', _twist, _twistThr, 'rad/s'),
             UiListGroup(
               header: 'Detected',

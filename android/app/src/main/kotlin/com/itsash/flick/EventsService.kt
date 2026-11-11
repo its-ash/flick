@@ -108,7 +108,7 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         runner.run(prefs.actionOf(gesture))
     }
 
-    /** Own-pattern vibration; the engine also mutes chop / twist while it runs. */
+    /** Own-pattern vibration; the engine also mutes shake / twist while it runs. */
     private fun buzz(gesture: Gesture) = engine.buzz(gesture, prefs.vibrate)
 
     private fun startInForeground() {
