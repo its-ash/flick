@@ -40,10 +40,10 @@ void main() {
 
   test('chop settings parse with safe defaults', () {
     final d = EventsConfig.fromMap(configMap());
-    expect(d.chopThreshold, 12);
+    expect(d.chopThreshold, 30);
     expect(d.pocketGate, isFalse);
-    final c = EventsConfig.fromMap({...configMap(), 'chopThreshold': 8.5, 'pocketGate': true, 'hasAxis': true});
-    expect(c.chopThreshold, 8.5);
+    final c = EventsConfig.fromMap({...configMap(), 'chopThreshold': 22.5, 'pocketGate': true, 'hasAxis': true});
+    expect(c.chopThreshold, 22.5);
     expect(c.pocketGate, isTrue);
     expect(c.hasAxis, isTrue);
     expect(GestureKind.chop.title, 'Chop twice');

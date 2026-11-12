@@ -28,7 +28,7 @@ class SettingsScreen extends StatelessWidget {
               UiSection(
                 title: 'Sensitivity',
                 subtitle:
-                    'Chop trigger level: Low 16, Medium 12, High 8 m/s². High catches gentler chops but may trigger by accident.',
+                    'Chop trigger level: Low 40, Medium 30, High 22 m/s². High catches gentler chops but may trigger by accident.',
                 child: UiColumn(
                   gap: UiSpace.md,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -44,10 +44,10 @@ class SettingsScreen extends StatelessWidget {
                       onChanged: (v) => store.setOption('sensitivity', v),
                     ),
                     UiSlider(
-                      value: c.chopThreshold.clamp(6.0, 20.0),
-                      min: 6,
-                      max: 20,
-                      divisions: 28,
+                      value: c.chopThreshold.clamp(15.0, 60.0),
+                      min: 15,
+                      max: 60,
+                      divisions: 45,
                       label: 'Chop trigger level (m/s²)',
                       format: (v) => v.toStringAsFixed(1),
                       onChangeEnd: (v) => store.setOption('chopThreshold', v),

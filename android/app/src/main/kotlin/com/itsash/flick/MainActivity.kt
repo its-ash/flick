@@ -27,7 +27,7 @@ import io.flutter.plugin.common.MethodChannel
  *   - status() -> {notifications, overlay, dnd, battery, accelerometer, gyroscope, proximity, tileSupported}
  *   - openPermission({name}): "notifications" | "overlay" | "dnd" | "battery".
  *   - tryAction({action}): runs an action now, for the "Try" buttons; returns an error text or null.
- *   - setOption also takes "chopThreshold" (double, 6-20), "pocketGate" and "chopAxisOnly" (bool).
+ *   - setOption also takes "chopThreshold" (double, 15-60), "pocketGate" and "chopAxisOnly" (bool).
  *   - addTile() -> asks Android 13+ to add the Quick Settings tile.
  *   - startTraining({gesture}) / stopTraining() / resetTraining({gesture}): personal strength
  *     (only meaningful while the probe stream below is listened to).

@@ -10,7 +10,7 @@ user picked. Flutter is only the settings UI.
 |---|---|---|---|
 | Pick up | accelerometer (gravity) | wake screen | only while the screen is off; phone must rest flat ≥ 1 s first |
 | Wave over | proximity (wake-up variant if present) | wake screen | only while the screen is off; near 80–1000 ms |
-| Chop twice | linear acceleration (fallback: accelerometer + filter); proximity only if "Pocket gate" is on | flashlight | two sharp push+stop spikes 150–800 ms apart, any direction/orientation; see Gesture design |
+| Chop twice | linear acceleration (fallback: accelerometer + filter); proximity only if "Pocket gate" is on | flashlight | 4 alternating strong lobes (two whip chops ~240 ms apart) along one axis, any direction/orientation; see Gesture design |
 | Twist twice | gyroscope X/Y (any orientation) | camera | 3 alternating peaks (out, back, out) within 1.6 s; adaptive threshold |
 | Flip | accelerometer (gravity z) | Do Not Disturb (fixed) | face down 1.5 s → DND on; face up → previous mode back |
 
@@ -24,19 +24,30 @@ low / normal / high scales thresholds ×1.3 / ×1 / ×0.75.
 - Chop twice (`ChopDetector` in `ChopDetector.kt`, Motorola-style; key `chop`; replaced the
   shake detector v1.0.3 and the double-chop before it). Input: linear acceleration (fallback:
   accelerometer through `GravityFilter`), ~100 Hz, no gravity vector needed, any orientation.
-  Chop = push spike |a| ≥ threshold (≤ 150 ms wide, ≤ 80 m/s²) followed within 180 ms by an
-  opposite spike ≥ 0.5 × threshold along the push axis. Two chops on the same axis (|cos| ≥ 0.6),
-  150–800 ms apart (push to push), fire. Between chops the signal must stay < 0.35 × threshold
-  for 40 ms (a swing or shake never has that dip, so it never fires). First chop needs 600 ms
-  without activity ≥ 0.5 × threshold before it (walking / jogging / stairs never are calm);
-  slow noise RMS (clipped at 0.5 × threshold) > 0.3 × threshold = carried, nothing counts.
-  Cooldown 1 s after a fire + 300 ms quiet; chops in that window are lost, so a 3rd chop never
-  cancels. Known limit: running that starts from standstill with two hard heel strikes in a
-  row can look like a double chop.
-  Threshold (prefs `chop.threshold`, m/s², 6–20, default 12): Low / Medium / High = 16 / 12 / 8
-  (setting the segmented control writes it), fine slider in Settings. Calibrate (Test screen):
-  3 double chops with the easy threshold 6, then 60 % of the median of the weaker chop of each
-  pair, plus the mean chop axis (optional ±45° cone, switch "Only my chop direction", off).
+  Retuned 2026-11-12, measured on a motorola edge 30 against Motorola's own hardware sensor
+  (`ChopChop Wakeup`, type `com.motorola.sensor.chopchop` 65546, used by Moto Actions'
+  `FlashOnChopService`): a real chop-chop is a whip, acceleration along the chop axis (device x
+  for a phone held like a knife) swinging + − + − with lobe peaks 70–280 ms apart, ~350 ms in
+  total, peaks 34–90 m/s² (accelerometer saturates at 8 g ≈ 78), gyro z ±10–20 rad/s. Moto
+  fired at lobe peaks ≥ ~34 and ignored a gentle attempt at ~24–37. The old push+stop detector
+  caught 0 of 22 (whole gesture never dips, peaks > its 80 m/s² impact cap).
+  Algorithm: a motion starts at |a| ≥ floor (0.4 × threshold); its axis = |a|-weighted sum of
+  samples ≥ floor, each sign-flipped to agree with the sum (± lobes add, the sideways wrist-turn
+  part cancels). Lobes = same-sign runs of p = a·axis with |p| ≥ floor (end on sign change or
+  60 ms below); strong = peak ≥ threshold and ≤ 300 ms wide. Motion ends when no lobe is open
+  and the last peak is 200 ms old; fires with 3 strong alternating lobes in a row inside an
+  alternating chain of ≥ 4 (peaks ≤ 300 ms apart; Moto fires when the 1st or 4th swing is
+  weak), ≤ 8 strong in a row, ≤ 10 lobes total, so a continuous shake never fires and 3–4 chops
+  give one toggle. 500 ms cooldown. Fires ~0.2–0.45 s after Motorola (waits for the motion end).
+  Threshold (prefs `chop.threshold`, m/s², 15–60, default 30): Low / Medium / High = 40 / 30 / 22
+  (setting the segmented control writes it), fine slider in Settings. On 2 recordings (36 Moto
+  events): 30 → 36/36, 4 extra (deliberate gentle attempts Moto ignored); 35 → 36/36, 3 extra;
+  40 → 35/36, 0 extra. `lastMotion` holds a per-motion lobe trace (replay test prints it).
+  Calibrate (Test screen): 3 double chops with the easy threshold 15, then 60 % of the median
+  weakest strong lobe, plus the chop axis (optional ±45° cone, switch "Only my chop direction", off).
+  `prefs_version` 3 resets the chop level, trained flag and axis (old 6–20 scale).
+  Recording tool: `tools/sensorrec/` (see its README); `ChopReplayTest` replays a recording
+  (`CHOP_REC=/path/rec.csv make test-native`) and prints caught / missed / extra per threshold.
   Pocket gate (proximity near ignores chops) is optional and OFF by default; near = value < min(range, 3).
   Test screen: live motion bar, peak of the last burst vs the trigger line, Diagnostics card
   (`Diag.kt`: service running, background sample rate, torch state, last gesture / action + error).

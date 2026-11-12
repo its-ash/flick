@@ -45,16 +45,24 @@ class EventsPrefs(context: Context) {
      * value, disabled gesture or low sensitivity can not keep the flashlight gesture from firing.
      */
     private fun migrate() {
-        if (prefs.getInt(KEY_VERSION, 0) >= 2) return
+        val version = prefs.getInt(KEY_VERSION, 0)
+        if (version >= 3) return
         prefs.edit().apply {
-            for (k in listOf("calib.shake", "calib.chop", "gesture.shake.enabled", "gesture.shake.action", "gesture.chop.enabled", "gesture.chop.action")) remove(k)
+            if (version < 2) {
+                for (k in listOf("calib.shake", "calib.chop", "gesture.shake.enabled", "gesture.shake.action", "gesture.chop.enabled", "gesture.chop.action")) remove(k)
+            }
+            // v3: the chop detector was retuned on Motorola's chop-chop (trigger levels 15-60 instead
+            // of 6-20), so an old level, trained value or learned direction no longer applies.
             putString(KEY_SENSITIVITY, "normal")
             putFloat(KEY_CHOP_THRESHOLD, ChopDetector.NORMAL)
-            putInt(KEY_VERSION, 2)
+            putBoolean("chop.trained", false)
+            putBoolean(KEY_AXIS_ONLY, false)
+            remove("chop.ax"); remove("chop.ay"); remove("chop.az")
+            putInt(KEY_VERSION, 3)
         }.apply()
     }
 
-    /** Chop trigger level in m/s² (6-20). Low / Normal / High set 16 / 12 / 8; the slider sets any value. */
+    /** Chop trigger level in m/s² (15-60). Low / Normal / High set 40 / 30 / 22; the slider sets any value. */
     var chopThreshold: Float
         get() = prefs.getFloat(KEY_CHOP_THRESHOLD, ChopDetector.NORMAL).coerceIn(ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD)
         set(v) = prefs.edit().putFloat(KEY_CHOP_THRESHOLD, v.coerceIn(ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD)).apply()

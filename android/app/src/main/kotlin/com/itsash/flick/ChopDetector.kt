@@ -1,5 +1,6 @@
 package com.itsash.flick
 
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -8,58 +9,59 @@ private const val MS = 1_000_000L
 private const val NEVER = Long.MIN_VALUE / 2
 
 /**
- * Chop twice (Motorola style): two quick karate-chop motions, like holding the phone
- * like a knife. Input is linear acceleration (m/s², gravity already removed), any
- * orientation; no gravity vector is needed. Pure Kotlin, time based (ns timestamps).
+ * Chop twice (Motorola style). Input is linear acceleration (m/s², gravity removed), any
+ * orientation. Pure Kotlin, time based (ns timestamps), independent of the sample rate.
  *
- * One chop = a sharp spike (push, |a| >= [threshold]) followed within 180 ms by an
- * opposite-sign spike (stop, at least half the threshold) along the same axis. The
- * axis is the direction of the push, so down, forward and sideways chops all work.
+ * Tuned on a recording of Motorola's own hardware chop-chop sensor (motorola edge 30,
+ * tools/sensorrec): a chop is a whip, a hard swing along one axis (x for a phone held like a
+ * knife) stopped just as hard, so the acceleration along that axis swings + then -. A double
+ * chop is four such lobes in a row, alternating in sign, peaks 70-280 ms apart, the whole
+ * gesture about 350 ms. Lobe peaks were 34-90 m/s² when Motorola fired and at most ~37 when
+ * it did not; the accelerometer saturates at 8 g, so strong chops read flat at ~75-80.
+ * The wrist also turns, adding an acceleration toward the wrist in every lobe; it has the
+ * same sign in + and - lobes, so it cancels out of the chop axis below.
+ *
  * Rules:
- * - the push may stay above the threshold for 150 ms at most (a chop is a 50-120 ms
- *   impulse; a swing or sway is wider), and may not exceed 80 m/s² (an impact);
- * - after a chop the signal must dip below 0.35 x threshold for 40 ms before the next
- *   chop can start, so one long swing or a continuous shake never counts twice;
- * - the first chop of a pair needs 600 ms without activity above 0.5 x threshold
- *   before it (walking, jogging, stairs are rhythmic and never calm);
- * - while the slow noise level (RMS of recent motion, clipped at 0.5 x threshold)
- *   is above 0.3 x threshold the phone is being carried and nothing counts;
- * - two chops on (nearly) the same axis, 150-800 ms apart (start to start), fire;
- *   a later or off-axis second chop only becomes the new first chop;
- * - after a fire there is a 1 s cooldown and the signal has to be quiet for 300 ms.
- *   Further chops in that time are lost: a third chop never cancels the toggle.
- * Optional: [axis] (a learned chop direction, device coordinates) restricts pushes to
- * a +-45 degree cone around it. [blocked] (proximity near, optional gate) ignores all.
+ * - a motion starts with a sample of |a| >= 0.4 x [threshold]. Its axis is the sum of those
+ *   samples weighted by |a|, each flipped to point the same way as the sum (so + and - lobes
+ *   add up and the sideways wrist part cancels). Samples are measured along that axis (p);
+ * - a lobe is a run of samples with |p| >= 0.4 x threshold and the same sign; it ends when p
+ *   changes sign or stays below that floor for 60 ms. It is strong when its peak |p| >=
+ *   threshold and it lasted at most 300 ms (a slow swing is wider);
+ * - lobes chain while each one has the opposite sign of the one before and peaks at most
+ *   300 ms after it; strong lobes count in a row the same way, a weak lobe restarts that count;
+ * - the motion ends when no lobe is open and the last peak is 200 ms old. It fires when it had
+ *   3 strong lobes in a row inside a chain of at least 4 (Motorola fires when the first or the
+ *   last of the four is weaker), at most 8 strong in a row and at most 10 lobes in total: a
+ *   continuous shake keeps going and never fires, and three or four chops give one toggle;
+ * - with [axis] set (learned direction), the motion axis must be within 45 degrees of it;
+ * - after a fire, motions ending within 500 ms are ignored.
  */
 class ChopDetector(var threshold: Float = DEFAULT_THRESHOLD) {
     companion object {
-        const val DEFAULT_THRESHOLD = 12f
-        const val MIN_THRESHOLD = 6f
-        const val MAX_THRESHOLD = 20f
-        const val LOW = 16f
-        const val NORMAL = 12f
-        const val HIGH = 8f
+        const val DEFAULT_THRESHOLD = 30f
+        const val MIN_THRESHOLD = 15f
+        const val MAX_THRESHOLD = 60f
+        const val LOW = 40f
+        const val NORMAL = 30f
+        const val HIGH = 22f
 
         /** Easiest level, used while the user trains. */
-        const val TRAIN_THRESHOLD = 6f
+        const val TRAIN_THRESHOLD = 15f
 
-        /** Training learns 60% of the weakest chop of each double chop. */
+        /** Training learns 60% of the weakest lobe of each double chop. */
         const val TRAIN_FRACTION = 0.6f
-        const val MAX_PEAK = 80f
         const val CONE_COS = 0.7071f
-        private const val BRAKE_WINDOW = 180 * MS
-        private const val MAX_WIDTH = 150 * MS
-        private const val BRAKE_FRACTION = 0.5f
-        private const val VALLEY_FRACTION = 0.35f
-        private const val VALLEY_HOLD = 40 * MS
-        private const val CALM_FRACTION = 0.5f
-        private const val CALM_BEFORE = 600 * MS
-        private const val NOISE_FRACTION = 0.3f
-        private const val MIN_GAP = 150 * MS
-        private const val MAX_GAP = 800 * MS
-        private const val SAME_AXIS = 0.6f
-        private const val COOLDOWN = 1000 * MS
-        private const val AFTER_FIRE_QUIET = 300 * MS
+        private const val FLOOR_FRACTION = 0.4f
+        private const val LOBE_END = 60 * MS
+        private const val MAX_LOBE_WIDTH = 300 * MS
+        private const val MAX_LOBE_GAP = 300 * MS
+        private const val END_WAIT = 200 * MS
+        private const val MIN_STRONG = 3
+        private const val MIN_CHAIN = 4
+        private const val MAX_STRONG = 8
+        private const val MAX_LOBES = 10
+        private const val COOLDOWN = 500 * MS
         private const val NOISE_TAU = 3f
         private const val BURST_FLOOR = 2.5f
         private const val BURST_END = 200 * MS
@@ -72,36 +74,38 @@ class ChopDetector(var threshold: Float = DEFAULT_THRESHOLD) {
         }
     }
 
-    private enum class S { IDLE, PUSH, WAIT_DIP }
-
     /** Learned chop direction (unit vector, device coordinates) or null for any direction. */
     var axis: FloatArray? = null
 
     /** Set while the phone is covered (proximity near), when the pocket gate is on. */
     var blocked = false
 
-    private var state = S.IDLE
     private var last = -1L
     private var muteUntil = Long.MIN_VALUE
     private var noiseMs = 0f
+    private var cooldownUntil = NEVER
 
-    private var pushT = 0L
-    private var aboveT = 0L
-    private var peak = 0f
-    private var calmOk = false
-    private val u = FloatArray(3)
+    // Current motion.
+    private var active = false
+    private var motionStart = 0L
+    private val trace = StringBuilder()
+    private val sum = FloatArray(3)
+    private var lobes = 0
+    private var prevSign = 0
+    private var prevPeakT = NEVER
+    private var run = 0
+    private var runMin = 0f
+    private var chain = 0
+    private var bestRun = 0
+    private var bestMin = 0f
+    private var qualified = false
 
-    private var quietSince = -1L
-    private var inLoud = false
-    private var lastLoudEnd = NEVER
-    private var quietBeforeRun = Long.MAX_VALUE / 4
-    private var cooldownUntil = Long.MIN_VALUE
-    private var quietUntilCalm = false
-
-    private var pendT = NEVER
-    private var pendPeak = 0f
-    private val pendU = FloatArray(3)
-    private var hasPending = false
+    // Current lobe.
+    private var lobeSign = 0
+    private var lobeStart = 0L
+    private var lobePeak = 0f
+    private var lobePeakT = 0L
+    private var lobeBelowSince = -1L
 
     private var burstMax = 0f
     private var burstLast = NEVER
@@ -119,131 +123,165 @@ class ChopDetector(var threshold: Float = DEFAULT_THRESHOLD) {
     var burstSeq = 0
         private set
 
-    /** Push peak of the last accepted chop, and a counter. */
+    /** Weaker lobe of the last chop (pair of strong lobes), and a counter. */
     var lastChopPeak = 0f
         private set
     var chopSeq = 0
         private set
 
-    /** Weakest push peak of the double chop that fired last, for training. */
+    /** Weakest strong lobe of the double chop that fired last, for training. */
     var lastPeak = 0f
         private set
 
-    /** Mean push direction (unit) of the double chop that fired last, for training. */
+    /** Chop axis (unit) of the double chop that fired last, for training. */
     val lastAxis = FloatArray(3)
 
-    /** 1 when a first chop is waiting for its partner. */
-    val pendingChops: Int get() = if (hasPending) 1 else 0
+    /** Summary of the last finished motion (lobes, strong lobes in a row, weakest), for diagnostics. */
+    var lastMotion = ""
+        private set
+    var motionSeq = 0
+        private set
 
-    /** Slow motion level (m/s²); the phone counts as carried above 0.3 x threshold. */
+    /** 1 when a first chop is waiting for its partner. */
+    val pendingChops: Int get() = if (active && !qualified && run >= 2) 1 else 0
+
+    /** Slow motion level (m/s², RMS over a few seconds), for the Test screen. */
     val noiseLevel: Float get() = sqrt(noiseMs)
 
     fun mute(untilNs: Long) {
         muteUntil = untilNs
-        reset()
-    }
-
-    private fun reset() {
-        state = S.IDLE
-        hasPending = false
-        inLoud = false
-        lastLoudEnd = NEVER
-        quietSince = -1L
-        quietUntilCalm = false
+        active = false
     }
 
     fun add(t: Long, x: Float, y: Float, z: Float): Boolean {
         val mag = sqrt(x * x + y * y + z * z)
         level = mag
         if (t < muteUntil || blocked) {
-            reset()
+            active = false
             last = t
             return false
         }
         val dt = if (last < 0) 0.01f else ((t - last) / 1e9f).coerceIn(0.001f, 0.2f)
         last = t
         val thr = threshold.coerceIn(MIN_THRESHOLD, MAX_THRESHOLD)
+        val floor = FLOOR_FRACTION * thr
 
         trackBurst(t, mag)
-        val clip = min(mag, CALM_FRACTION * thr)
+        val clip = min(mag, thr)
         noiseMs += (clip * clip - noiseMs) * min(1f, dt / NOISE_TAU)
 
-        if (mag >= CALM_FRACTION * thr) {
-            if (!inLoud) {
-                inLoud = true
-                quietBeforeRun = if (lastLoudEnd == NEVER) Long.MAX_VALUE / 4 else t - lastLoudEnd
-            }
-            lastLoudEnd = t
-        } else {
-            inLoud = false
+        if (!active) {
+            if (mag < floor) return false
+            startMotion(t, x, y, z)
         }
-
-        // The gap is measured push to push; the second chop is only confirmed once its stop arrived.
-        if (hasPending && t - pendT > MAX_GAP + BRAKE_WINDOW) hasPending = false
-
-        when (state) {
-            S.IDLE -> {
-                if (quietUntilCalm) {
-                    if (mag < CALM_FRACTION * thr) {
-                        if (quietSince < 0) quietSince = t
-                        if (t - quietSince >= AFTER_FIRE_QUIET) quietUntilCalm = false
-                    } else {
-                        quietSince = -1L
-                    }
-                    return false
-                }
-                if (mag < thr || sqrt(noiseMs) > NOISE_FRACTION * thr) return false
-                val ax = axis
-                if (ax != null && abs((x * ax[0] + y * ax[1] + z * ax[2]) / mag) < CONE_COS) {
-                    toWaitDip()
-                    return false
-                }
-                state = S.PUSH
-                pushT = t
-                aboveT = 0L
-                peak = mag
-                calmOk = quietBeforeRun >= CALM_BEFORE
-                u[0] = x / mag; u[1] = y / mag; u[2] = z / mag
-                return false
-            }
-
-            S.PUSH -> {
-                val p = x * u[0] + y * u[1] + z * u[2]
-                if (mag > peak && p > 0f) {
-                    peak = mag
-                    u[0] = x / mag; u[1] = y / mag; u[2] = z / mag
-                }
-                if (p >= thr) aboveT += (dt * 1e9f).toLong()
-                if (peak > MAX_PEAK || aboveT > MAX_WIDTH) {
-                    toWaitDip()
-                    return false
-                }
-                if (p <= -BRAKE_FRACTION * thr) {
-                    toWaitDip()
-                    return chopDone(t)
-                }
-                if (t - pushT > BRAKE_WINDOW) toWaitDip()
-                return false
-            }
-
-            S.WAIT_DIP -> {
-                if (mag < VALLEY_FRACTION * thr) {
-                    if (quietSince < 0) quietSince = t
-                    if (t - quietSince >= VALLEY_HOLD) {
-                        state = S.IDLE
-                        quietSince = -1L
-                    }
-                } else {
-                    quietSince = -1L
-                }
-                return false
-            }
+        if (mag >= floor) {
+            // Weighted by |a| again, so the big chop lobes set the axis, not the small sideways
+            // samples at the start of a motion.
+            val s = (if (x * sum[0] + y * sum[1] + z * sum[2] < 0f) -1f else 1f) * mag
+            sum[0] += s * x; sum[1] += s * y; sum[2] += s * z
         }
+        val n = sqrt(sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2])
+        val p = (x * sum[0] + y * sum[1] + z * sum[2]) / n
+        val ap = abs(p)
+
+        if (ap >= floor) {
+            val sign = if (p > 0f) 1 else -1
+            if (lobeSign == 0) {
+                startLobe(t, sign, ap)
+            } else if (sign == lobeSign) {
+                lobeBelowSince = -1L
+                if (ap > lobePeak) { lobePeak = ap; lobePeakT = t }
+            } else {
+                closeLobe(t, thr)
+                startLobe(t, sign, ap)
+            }
+        } else if (lobeSign != 0) {
+            if (lobeBelowSince < 0) lobeBelowSince = t
+            if (t - lobeBelowSince >= LOBE_END) closeLobe(t, thr)
+        }
+        if (lobeSign == 0 && t - prevPeakT > END_WAIT) return endMotion(t)
+        return false
     }
 
-    private fun toWaitDip() {
-        state = S.WAIT_DIP
-        quietSince = -1L
+    private fun startMotion(t: Long, x: Float, y: Float, z: Float) {
+        active = true
+        motionStart = t
+        trace.setLength(0)
+        // Seeded so the first sample has a direction; it is added again as a strong sample.
+        sum[0] = x * 1e-3f; sum[1] = y * 1e-3f; sum[2] = z * 1e-3f
+        lobes = 0
+        prevSign = 0
+        prevPeakT = NEVER
+        run = 0
+        chain = 0
+        bestRun = 0
+        bestMin = 0f
+        qualified = false
+        lobeSign = 0
+    }
+
+    private fun startLobe(t: Long, sign: Int, ap: Float) {
+        lobeSign = sign
+        lobeStart = t
+        lobePeak = ap
+        lobePeakT = t
+        lobeBelowSince = -1L
+    }
+
+    private fun closeLobe(t: Long, thr: Float) {
+        val alternates = prevSign != 0 && lobeSign != prevSign && lobePeakT - prevPeakT <= MAX_LOBE_GAP
+        lobes++
+        chain = if (alternates) chain + 1 else 1
+        prevSign = lobeSign
+        prevPeakT = lobePeakT
+        val strong = lobePeak >= thr && t - lobeStart <= MAX_LOBE_WIDTH
+        // Lobe trace for diagnostics: sign+peak, peak time from motion start, width (ms).
+        trace.append(if (lobeSign > 0) '+' else '-').append(lobePeak.toInt())
+            .append('@').append((lobePeakT - motionStart) / MS).append(" w").append((t - lobeStart) / MS).append(' ')
+        lobeSign = 0
+        if (!strong) {
+            // A weak follow-through lobe still completes 3 strong ones (Motorola fires on those).
+            if (alternates && run >= MIN_STRONG && chain >= MIN_CHAIN) qualify()
+            run = 0
+            return
+        }
+        if (run > 0 && alternates) {
+            run++
+            runMin = min(runMin, lobePeak)
+        } else {
+            run = 1
+            runMin = lobePeak
+        }
+        if (run % 2 == 0) {
+            chopSeq++
+            lastChopPeak = runMin
+        }
+        if (run > bestRun) bestRun = run
+        if (run >= MIN_STRONG && chain >= MIN_CHAIN) qualify()
+    }
+
+    private fun qualify() {
+        if (!qualified || runMin > bestMin) bestMin = runMin
+        qualified = true
+    }
+
+    /** The motion ended: fires when it was a double chop. */
+    private fun endMotion(t: Long): Boolean {
+        active = false
+        val n = sqrt(sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2])
+        val u = floatArrayOf(sum[0] / n, sum[1] / n, sum[2] / n)
+        val ax = axis
+        val onAxis = ax == null || abs(u[0] * ax[0] + u[1] * ax[1] + u[2] * ax[2]) >= CONE_COS
+        val fire = qualified && bestRun <= MAX_STRONG && lobes <= MAX_LOBES && onAxis && t >= cooldownUntil
+        motionSeq++
+        lastMotion = "lobes $lobes, strong in a row $bestRun, weakest %.1f, axis (%.2f, %.2f, %.2f)%s"
+            .format(Locale.US, bestMin, u[0], u[1], u[2], if (fire) ", fired" else "") + "; lobes: $trace"
+        if (fire) {
+            lastPeak = bestMin
+            for (i in 0..2) lastAxis[i] = u[i]
+            cooldownUntil = t + COOLDOWN
+        }
+        return fire
     }
 
     private fun trackBurst(t: Long, mag: Float) {
@@ -257,38 +295,5 @@ class ChopDetector(var threshold: Float = DEFAULT_THRESHOLD) {
             burstMax = 0f
             burstSeq++
         }
-    }
-
-    /** A finished chop (push + stop). Returns true when it completes a double chop. */
-    private fun chopDone(t: Long): Boolean {
-        lastChopPeak = peak
-        chopSeq++
-        val gap = pushT - pendT
-        if (hasPending && gap >= MIN_GAP && gap <= MAX_GAP) {
-            val dot = u[0] * pendU[0] + u[1] * pendU[1] + u[2] * pendU[2]
-            if (abs(dot) >= SAME_AXIS) {
-                hasPending = false
-                if (t < cooldownUntil) return false
-                lastPeak = min(peak, pendPeak)
-                val sign = if (dot >= 0f) 1f else -1f
-                for (i in 0..2) lastAxis[i] = pendU[i] + sign * u[i]
-                val n = sqrt(lastAxis[0] * lastAxis[0] + lastAxis[1] * lastAxis[1] + lastAxis[2] * lastAxis[2])
-                if (n > 1e-6f) for (i in 0..2) lastAxis[i] /= n
-                cooldownUntil = t + COOLDOWN
-                quietUntilCalm = true
-                quietSince = -1L
-                return true
-            }
-        }
-        if (hasPending && gap < MIN_GAP) return false
-        if (calmOk) {
-            hasPending = true
-            pendT = pushT
-            pendPeak = peak
-            for (i in 0..2) pendU[i] = u[i]
-        } else {
-            hasPending = false
-        }
-        return false
     }
 }

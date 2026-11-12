@@ -96,13 +96,14 @@ class DetectorsTest {
 
     // ---- chop twice ----
 
-    private val AMP = 18f // a normal chop, linear acceleration m/s²
+    // A normal chop, linear acceleration m/s². Measured on Motorola's chop-chop: 45-90, chops ~240 ms apart.
+    private val AMP = 45f
     private val DOWN_PORTRAIT = floatArrayOf(0f, -1f, 0f) // phone upright, chop downwards
     private val FORWARD_PORTRAIT = floatArrayOf(0f, 0f, -1f) // chop away from the user
     private val DOWN_LANDSCAPE = floatArrayOf(-1f, 0f, 0f)
     private val DOWN_FLAT = floatArrayOf(0f, 0f, -1f)
 
-    private fun doubleChop(dir: FloatArray, amp: Float = AMP, first: Long = 1000, gap: Long = 350, ms: Long = 4000) =
+    private fun doubleChop(dir: FloatArray, amp: Float = AMP, first: Long = 1000, gap: Long = 240, ms: Long = 4000) =
         Trace(ms).apply {
             chop(first, amp, dir)
             chop(first + gap, amp, dir)
@@ -130,10 +131,11 @@ class DetectorsTest {
 
     @Test
     fun doubleChopFiresAcrossTimingAndStrength() {
-        for (gap in listOf(250L, 350L, 500L, 700L, 780L)) {
+        for (gap in listOf(180L, 240L, 300L)) {
             assertEquals("gap $gap", 1, fires(doubleChop(Y, gap = gap)).size)
         }
-        for (amp in listOf(14f, 25f, 40f)) {
+        // No upper limit: the accelerometer saturates at 8 g on a hard chop.
+        for (amp in listOf(40f, 60f, 90f)) {
             assertEquals("amp $amp", 1, fires(doubleChop(Y, amp = amp)).size)
         }
     }
@@ -148,26 +150,26 @@ class DetectorsTest {
     fun twoChopsFarApartDoNotFire() {
         val t = Trace(5000).apply { chop(1000, AMP, Y); chop(2500, AMP, Y); noise(0.1f) }
         assertEquals(0, fires(t).size)
-        val tooFast = Trace(4000).apply { chop(1000, AMP, Y); chop(1100, AMP, Y); noise(0.1f) }
-        assertEquals(0, fires(tooFast).size)
+        val slow = Trace(5000).apply { chop(1000, AMP, Y); chop(1500, AMP, Y); noise(0.1f) }
+        assertEquals(0, fires(slow).size)
     }
 
     @Test
     fun tripleChopFiresOnceAndDoesNotCancel() {
-        val t = Trace(5000).apply { chop(1000, AMP, Y); chop(1350, AMP, Y); chop(1700, AMP, Y); noise(0.1f) }
+        val t = Trace(5000).apply { chop(1000, AMP, Y); chop(1240, AMP, Y); chop(1480, AMP, Y); noise(0.1f) }
         val fired = fires(t)
         assertEquals(fired.toString(), 1, fired.size)
-        val four = Trace(6000).apply { for (k in 0 until 4) chop(1000 + k * 350L, AMP, Y); noise(0.1f) }
+        val four = Trace(6000).apply { for (k in 0 until 4) chop(1000 + k * 240L, AMP, Y); noise(0.1f) }
         assertEquals(1, fires(four).size)
     }
 
     @Test
     fun secondDoubleChopTogglesAgain() {
-        // Torch on at ~1.4 s, torch off at ~2.6 s (1.2 s later), and once more later.
+        // Torch on, torch off ~1.2 s later (as fast as the recording), and once more later.
         val t = Trace(9000).apply {
-            chop(1000, AMP, Y); chop(1350, AMP, Y)
-            chop(2200, AMP, Y); chop(2550, AMP, Y)
-            chop(5000, AMP, X); chop(5400, AMP, X)
+            chop(1000, AMP, Y); chop(1240, AMP, Y)
+            chop(2200, AMP, Y); chop(2440, AMP, Y)
+            chop(5000, AMP, X); chop(5300, AMP, X)
             noise(0.1f)
         }
         val fired = fires(t)
@@ -177,10 +179,10 @@ class DetectorsTest {
     @Test
     fun chopAfterTheBuzzStillWorks() {
         val t = Trace(9000).apply {
-            chop(1000, AMP, Y); chop(1350, AMP, Y)
-            // our own vibration right after the fire: two sharp ticks
-            pulse(1500, 30, 20f, Z); pulse(1600, 30, -20f, Z); pulse(1700, 30, 20f, Z)
-            chop(2400, AMP, Y); chop(2750, AMP, Y)
+            chop(1000, AMP, Y); chop(1240, AMP, Y)
+            // our own vibration right after the fire (~1.65 s): sharp ticks
+            pulse(1700, 30, 20f, Z); pulse(1800, 30, -20f, Z); pulse(1900, 30, 20f, Z)
+            chop(2600, AMP, Y); chop(2840, AMP, Y)
             noise(0.1f)
         }
         val fired = t.runWithBuzz(ChopDetector())
@@ -239,27 +241,27 @@ class DetectorsTest {
     @Test
     fun continuousShakeDoesNotFire() {
         for (hz in listOf(2f, 3f, 5f)) {
-            for (amp in listOf(14f, 20f, 30f)) {
+            for (amp in listOf(35f, 50f, 80f)) {
                 val t = Trace(8000).apply { sine(1000, (5 * 2 * hz).toInt(), hz, amp, X); noise(0.1f) }
                 val fired = fires(t)
                 assertEquals("shake $hz Hz amp $amp $fired", 0, fired.size)
             }
         }
         // a slow big swing (one long wave) never counts as a chop
-        val swing = Trace(6000).apply { sine(1000, 6, 1f, 25f, Y); noise(0.1f) }
+        val swing = Trace(6000).apply { sine(1000, 6, 1f, 45f, Y); noise(0.1f) }
         assertEquals(0, fires(swing).size)
     }
 
     @Test
     fun sensitivityLowVersusHigh() {
-        val soft = doubleChop(Y, amp = 14f) // gentle chop
+        val soft = doubleChop(Y, amp = 40f) // gentle chop: brake lobe ~31
         assertEquals(0, fires(soft, ChopDetector(ChopDetector.LOW)).size)
         assertEquals(1, fires(soft, ChopDetector(ChopDetector.NORMAL)).size)
         assertEquals(1, fires(soft, ChopDetector(ChopDetector.HIGH)).size)
-        val tiny = doubleChop(Y, amp = 10f)
+        val tiny = doubleChop(Y, amp = 30f)
         assertEquals(0, fires(tiny, ChopDetector(ChopDetector.NORMAL)).size)
         assertEquals(1, fires(tiny, ChopDetector(ChopDetector.HIGH)).size)
-        val hard = doubleChop(Y, amp = 25f)
+        val hard = doubleChop(Y, amp = 60f)
         assertEquals(1, fires(hard, ChopDetector(ChopDetector.LOW)).size)
         assertEquals(ChopDetector.LOW, ChopDetector.forSensitivity("low"), 0f)
         assertEquals(ChopDetector.HIGH, ChopDetector.forSensitivity("high"), 0f)
@@ -286,7 +288,7 @@ class DetectorsTest {
     fun trainingReportsPeakAndAxis() {
         val d = ChopDetector(ChopDetector.TRAIN_THRESHOLD)
         assertEquals(1, fires(doubleChop(floatArrayOf(0.8f, 0.6f, 0f), amp = 20f), d).size)
-        assertTrue("peak ${d.lastPeak}", d.lastPeak in 17f..21f)
+        assertTrue("peak ${d.lastPeak}", d.lastPeak in 15f..21f)
         assertEquals(0.8f, Math.abs(d.lastAxis[0]), 0.15f)
         assertEquals(0.6f, Math.abs(d.lastAxis[1]), 0.15f)
         assertTrue(d.chopSeq >= 2)
@@ -320,9 +322,9 @@ class DetectorsTest {
 
     @Test
     fun calibrationForChop() {
-        val v = Calibration.threshold(listOf(20f, 22f, 18f), ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD, ChopDetector.TRAIN_FRACTION)!!
-        assertEquals(12f, v, 0.01f)
-        val weak = Calibration.threshold(listOf(8f, 9f, 10f), ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD, ChopDetector.TRAIN_FRACTION)!!
+        val v = Calibration.threshold(listOf(50f, 55f, 45f), ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD, ChopDetector.TRAIN_FRACTION)!!
+        assertEquals(30f, v, 0.01f)
+        val weak = Calibration.threshold(listOf(20f, 22f, 25f), ChopDetector.MIN_THRESHOLD, ChopDetector.MAX_THRESHOLD, ChopDetector.TRAIN_FRACTION)!!
         assertEquals(ChopDetector.MIN_THRESHOLD, weak, 0.001f)
     }
 

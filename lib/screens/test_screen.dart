@@ -118,11 +118,11 @@ class _TestScreenState extends State<TestScreen> {
   }
 
   Widget _chopCard() {
-    final thr = _n('chopThr', 12);
+    final thr = _n('chopThr', 30);
     final level = _n('chop');
     final training = _training == 'chop';
     final trained = store.config?.trained.contains('chop') ?? false;
-    final max = (thr * 2).clamp(12.0, 40.0);
+    final max = (thr * 2).clamp(40.0, 100.0);
     final peakOk = _lastBurstPeak >= thr;
     return UiSection(
       title: 'Chop twice',
