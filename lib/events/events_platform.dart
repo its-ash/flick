@@ -86,7 +86,6 @@ class EventsStatus {
   final Map<Object?, Object?> _map;
 
   bool _b(String k) => _map[k] as bool? ?? false;
-  bool get notifications => _b('notifications');
   bool get overlay => _b('overlay');
   bool get dnd => _b('dnd');
   bool get battery => _b('battery');
@@ -113,7 +112,7 @@ class EventsPlatform {
   Future<void> setGesture(GestureKind g, {required bool enabled, required GestureAction action}) =>
       _channel.invokeMethod('setGesture', {'gesture': g.key, 'enabled': enabled, 'action': action.key});
 
-  /// "notifications" | "overlay" | "dnd" | "battery"
+  /// "overlay" | "dnd" | "battery"
   Future<void> openPermission(String name) => _channel.invokeMethod('openPermission', {'name': name});
 
   /// Runs the action now. Returns null on success or the error text.

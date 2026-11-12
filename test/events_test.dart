@@ -61,7 +61,7 @@ void main() {
   test('missing lists only permissions the setup needs', () {
     final store = EventsStore()
       ..config = EventsConfig.fromMap(configMap())
-      ..status = const EventsStatus({'notifications': true, 'battery': true, 'overlay': false, 'dnd': false});
+      ..status = const EventsStatus({'battery': true, 'overlay': false, 'dnd': false});
     // Camera is used (needs overlay); nothing uses Do Not Disturb.
     expect(store.missing.map((m) => m.$1), ['overlay']);
   });

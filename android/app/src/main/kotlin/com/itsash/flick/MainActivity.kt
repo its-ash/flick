@@ -1,11 +1,9 @@
 package com.itsash.flick
 
-import android.Manifest
 import android.app.NotificationManager
 import android.app.StatusBarManager
 import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.hardware.Sensor
 import android.hardware.SensorManager
@@ -24,8 +22,8 @@ import io.flutter.plugin.common.MethodChannel
  *   - setEnabled({enabled}): saves and starts/stops EventsService.
  *   - setOption({key, value}): "screenOff" | "vibrate" (bool), "sensitivity" (low/normal/high).
  *   - setGesture({gesture, enabled, action}).
- *   - status() -> {notifications, overlay, dnd, battery, accelerometer, gyroscope, proximity, tileSupported}
- *   - openPermission({name}): "notifications" | "overlay" | "dnd" | "battery".
+ *   - status() -> {overlay, dnd, battery, accelerometer, gyroscope, proximity, tileSupported}
+ *   - openPermission({name}): "overlay" | "dnd" | "battery".
  *   - tryAction({action}): runs an action now, for the "Try" buttons; returns an error text or null.
  *   - setOption also takes "chopThreshold" (double, 15-60), "pocketGate" and "chopAxisOnly" (bool).
  *   - addTile() -> asks Android 13+ to add the Quick Settings tile.
@@ -130,13 +128,7 @@ class MainActivity : FlutterActivity() {
         val sensors = getSystemService(SensorManager::class.java)
         val nm = getSystemService(NotificationManager::class.java)
         val power = getSystemService(PowerManager::class.java)
-        val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        } else {
-            nm.areNotificationsEnabled()
-        }
         return mapOf(
-            "notifications" to notifications,
             "overlay" to Settings.canDrawOverlays(this),
             "dnd" to nm.isNotificationPolicyAccessGranted,
             "battery" to power.isIgnoringBatteryOptimizations(packageName),
@@ -150,16 +142,6 @@ class MainActivity : FlutterActivity() {
     private fun openPermission(name: String?) {
         val pkg = Uri.parse("package:$packageName")
         when (name) {
-            "notifications" -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-                    !askedNotifications()
-                ) {
-                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-                } else {
-                    startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
-                }
-            }
             "overlay" -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg))
             "dnd" -> startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
             "battery" -> {
@@ -167,14 +149,6 @@ class MainActivity : FlutterActivity() {
                 startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pkg))
             }
         }
-    }
-
-    /** Ask with the system dialog once; after that, open the app's notification settings. */
-    private fun askedNotifications(): Boolean {
-        val sp = getSharedPreferences(EventsPrefs.FILE, MODE_PRIVATE)
-        val asked = sp.getBoolean("asked_notifications", false)
-        if (!asked) sp.edit().putBoolean("asked_notifications", true).apply()
-        return asked
     }
 
     private fun addTile(result: MethodChannel.Result) {

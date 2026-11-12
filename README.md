@@ -24,7 +24,7 @@ Phone gestures that work in the background: chop twice for light, twist for came
 - **APK**: download the [latest APK](https://github.com/its-ash/flick/releases/latest/download/flick.apk) on your phone and open it. Allow your browser to install unknown apps if Android asks.
 
 Requires Android 8.0 (API 26) or later. Turn on **Gestures** in the app, then allow what it asks for:
-notifications, running in the background, "Display over other apps" (to open the camera) and
+running in the background, "Display over other apps" (to open the camera) and
 Do Not Disturb access (for Flip). Some phones (Xiaomi, Oppo, Vivo, Samsung) also need Flick
 set to "No restrictions" in battery settings to keep running.
 

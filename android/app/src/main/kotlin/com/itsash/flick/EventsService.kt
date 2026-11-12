@@ -123,11 +123,16 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     /** Own-pattern vibration; the engine also mutes shake / twist while it runs. */
     private fun buzz(gesture: Gesture) = engine.buzz(gesture, prefs.vibrate)
 
+    /**
+     * Android needs a notification for a foreground service, but Flick should run unseen like a
+     * system feature: the app has no POST_NOTIFICATIONS permission, so on Android 13+ this is
+     * never shown in the shade; on 8-12 the MIN channel keeps it folded, with no status bar icon.
+     */
     private fun startInForeground() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL, "Gestures running", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "Shown while Flick listens for gestures."
+                description = "Required by Android while Flick listens for gestures. You can turn it off."
                 setShowBadge(false)
             },
         )

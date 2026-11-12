@@ -46,8 +46,6 @@ class EventsStore extends ChangeNotifier {
     if (c == null || s == null) return const [];
     final used = c.usedActions;
     return [
-      if (!s.notifications)
-        ('notifications', 'Notifications', 'Android shows a small notification while gestures are on.'),
       if (!s.battery)
         ('battery', 'Run in the background', 'Stops Android from closing Flick to save battery.'),
       if (used.contains(GestureAction.camera) && !s.overlay)
