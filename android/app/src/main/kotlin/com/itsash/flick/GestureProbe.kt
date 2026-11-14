@@ -52,6 +52,7 @@ class GestureProbe(context: Context) : EventChannel.StreamHandler, GestureEngine
             "serviceEnabled" to prefs.serviceEnabled,
             "serviceHz" to Diag.serviceHz,
             "serviceSensor" to Diag.serviceSensor,
+            "serviceHardware" to (EventsService.running && Diag.serviceHardwareChop),
             "serviceSampleAgo" to Diag.ago(Diag.serviceSampleAt),
             "probeHz" to engine.hz,
             "probeSensor" to engine.sensorName,

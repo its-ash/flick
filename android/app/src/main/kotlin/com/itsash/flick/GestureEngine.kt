@@ -22,6 +22,11 @@ import android.util.Log
  *   is on, or for Wave;
  * - pickup / flip: TYPE_GRAVITY, else the same filter's gravity;
  * - twist: gyroscope (all 3 axes).
+ * - chop on Motorola phones: the vendor "ChopChop Wakeup" sensor (com.motorola.sensor.chopchop),
+ *   the same detector Moto Actions uses. It runs on the sensor chip, fires at the 3rd swing and
+ *   wakes the CPU itself, so it needs no 100 Hz stream and no wake lock. Used when present and
+ *   "Use the phone's chop sensor" is on; the software [ChopDetector] is the fallback. The Test
+ *   screen still streams linear acceleration for its meter and Calibrate.
  * Sensors are only re-registered when the set of needed sensors changes, so editing a
  * setting never drops samples in the middle of a gesture.
  */
@@ -50,6 +55,16 @@ class GestureEngine(
     private var enabled: Set<Gesture> = emptySet()
     private var registered: Pair<Set<Int>, Boolean> = emptySet<Int>() to false
     private var accelForChop = false
+    private val chopSensor: Sensor? = hardwareChopSensor(sensors)
+
+    /** True while chops come from the phone's own chop sensor instead of [ChopDetector]. */
+    @Volatile var hardwareChop = false
+        private set
+    private var lastHardwareChop = 0L
+
+    /** True when a registered sensor only delivers while the CPU is awake (needs a wake lock). */
+    var needsCpu = false
+        private set
     private var accelForPose = false
     private var proximityRange = 5f
 
@@ -80,12 +95,17 @@ class GestureEngine(
         val needPose = Gesture.PICKUP in gestures || Gesture.FLIP in gestures
         val needProx = Gesture.WAVE in gestures || (needChop && prefs.pocketGate)
         val wakeUp = prefs.screenOff
+        val hw = needChop && prefs.chopHardware && chopSensor != null
+        hardwareChop = hw
+        // The Test screen keeps the motion stream for its live meter and Calibrate.
+        val needStream = needChop && (!hw || source != "service")
         val linear = pick(Sensor.TYPE_LINEAR_ACCELERATION, wakeUp)
         val gravity = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY)
-        accelForChop = needChop && linear == null
+        accelForChop = needStream && linear == null
         accelForPose = needPose && gravity == null
         val want = buildSet {
-            if (needChop && linear != null) add(Sensor.TYPE_LINEAR_ACCELERATION)
+            if (hw) add(chopSensor!!.type)
+            if (needStream && linear != null) add(Sensor.TYPE_LINEAR_ACCELERATION)
             if (needPose && gravity != null) add(Sensor.TYPE_GRAVITY)
             if (accelForChop || accelForPose) add(Sensor.TYPE_ACCELEROMETER)
             if (Gesture.TWIST in gestures) add(Sensor.TYPE_GYROSCOPE)
@@ -95,6 +115,8 @@ class GestureEngine(
             chop.blocked = false
             proximityNear = false
         }
+        needsCpu = want.any { it != Sensor.TYPE_PROXIMITY && it != chopSensor?.type }
+        if (source == "service") Diag.serviceHardwareChop = hw
         val key = want to wakeUp
         if (key == registered) return
         sensors.unregisterListener(this)
@@ -105,10 +127,11 @@ class GestureEngine(
                 Sensor.TYPE_PROXIMITY -> sensors.getDefaultSensor(type, true) ?: sensors.getDefaultSensor(type)
                 Sensor.TYPE_LINEAR_ACCELERATION -> linear
                 Sensor.TYPE_ACCELEROMETER -> pick(type, wakeUp)
+                chopSensor?.type -> chopSensor
                 else -> sensors.getDefaultSensor(type)
             } ?: continue
-            val ok = if (type == Sensor.TYPE_PROXIMITY) {
-                proximityRange = s.maximumRange
+            val ok = if (type == Sensor.TYPE_PROXIMITY || s === chopSensor) {
+                if (type == Sensor.TYPE_PROXIMITY) proximityRange = s.maximumRange
                 sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_NORMAL)
             } else {
                 // 100 Hz where the phone allows it, never batched (max report latency 0).
@@ -162,6 +185,10 @@ class GestureEngine(
     override fun onSensorChanged(event: SensorEvent) {
         val t = event.timestamp
         val v = event.values
+        if (event.sensor === chopSensor || (chopSensor != null && event.sensor.type == chopSensor.type)) {
+            onHardwareChop(t)
+            return
+        }
         when (event.sensor.type) {
             Sensor.TYPE_LINEAR_ACCELERATION -> {
                 countSample()
@@ -212,7 +239,17 @@ class GestureEngine(
     }
 
     private fun feedChop(t: Long, x: Float, y: Float, z: Float) {
-        if (Gesture.CHOP in enabled && chop.add(t, x, y, z)) emit(Gesture.CHOP)
+        val fired = Gesture.CHOP in enabled && chop.add(t, x, y, z)
+        // With the hardware sensor the stream only feeds the meter, except while calibrating.
+        if (fired && (!hardwareChop || training == Gesture.CHOP)) emit(Gesture.CHOP)
+    }
+
+    private fun onHardwareChop(t: Long) {
+        Log.i(TAG, "$source: hardware chop")
+        if (!hardwareChop || Gesture.CHOP !in enabled || training == Gesture.CHOP || chop.blocked) return
+        if (t - lastHardwareChop < HARDWARE_GAP_NS) return
+        lastHardwareChop = t
+        emit(Gesture.CHOP)
     }
 
     private fun feedPose(t: Long, x: Float, y: Float, z: Float) {
@@ -232,5 +269,11 @@ class GestureEngine(
             Gesture.FLIP to longArrayOf(0, 25, 60, 25, 60, 90), // short short long
         )
         private const val MUTE_AFTER = 250L
+        private const val HARDWARE_GAP_NS = 400_000_000L
+        const val CHOP_SENSOR_TYPE = "com.motorola.sensor.chopchop"
+
+        /** Motorola's own chop-chop gesture sensor, or null on other phones. */
+        fun hardwareChopSensor(sensors: SensorManager): Sensor? =
+            sensors.getSensorList(Sensor.TYPE_ALL).firstOrNull { it.stringType == CHOP_SENSOR_TYPE }
     }
 }

@@ -62,6 +62,17 @@ class SettingsScreen extends StatelessWidget {
                     'work with the screen off, at some battery cost. Pocket gate: Motorola ignores chops while the '
                     'proximity sensor is covered; on some phones that sensor stays covered by mistake, so it is off.',
                 children: [
+                  if (s.chopSensor)
+                    UiSwitchTile(
+                      "Use the phone's chop sensor",
+                      subtitle:
+                          'Motorola detects Chop twice on its sensor chip: faster, works with the screen off, '
+                          'no battery cost. Turn off Chop in Moto Actions so the light does not toggle twice. '
+                          'Sensitivity and Calibrate then do not apply.',
+                      icon: Icons.memory_rounded,
+                      value: c.chopHardware,
+                      onChanged: (v) => store.setOption('chopHardware', v),
+                    ),
                   UiSwitchTile(
                     'Work with the screen off',
                     icon: Icons.battery_charging_full_rounded,

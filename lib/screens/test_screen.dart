@@ -201,7 +201,8 @@ class _TestScreenState extends State<TestScreen> {
     final enabled = _d['serviceEnabled'] == true;
     final svcHz = _i('serviceHz');
     final svcAgo = _n('serviceSampleAgo', -1);
-    final svcLive = running && svcHz > 0 && svcAgo >= 0 && svcAgo <= 3;
+    final svcHardware = _d['serviceHardware'] == true;
+    final svcLive = running && (svcHardware || (svcHz > 0 && svcAgo >= 0 && svcAgo <= 3));
     final probeHz = _i('probeHz');
     final torchAvail = _d['torchAvailable'] == true;
     final lastAction = (_d['lastAction'] as String?) ?? '';
@@ -228,6 +229,8 @@ class _TestScreenState extends State<TestScreen> {
           'Sensors in the background',
           subtitle: !running
               ? 'Service is not running'
+              : svcHardware
+              ? "Chop twice: the phone's own chop sensor (always on)"
               : svcLive
               ? '$svcHz samples per second, ${service.isEmpty ? 'motion sensor' : service}'
               : 'No samples arriving. Allow "Run in the background" and keep "Work with the screen off" on.',

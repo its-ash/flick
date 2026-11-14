@@ -87,6 +87,11 @@ class EventsPrefs(context: Context) {
             }
         }.apply()
 
+    /** Use the phone's own chop sensor (Motorola) when it has one. On by default. */
+    var chopHardware: Boolean
+        get() = prefs.getBoolean(KEY_CHOP_HARDWARE, true)
+        set(v) = prefs.edit().putBoolean(KEY_CHOP_HARDWARE, v).apply()
+
     var chopTrained: Boolean
         get() = prefs.getBoolean("chop.trained", false)
         set(v) = prefs.edit().putBoolean("chop.trained", v).apply()
@@ -149,6 +154,7 @@ class EventsPrefs(context: Context) {
         "chopThreshold" to chopThreshold.toDouble(),
         "pocketGate" to pocketGate,
         "chopAxisOnly" to chopAxisOnly,
+        "chopHardware" to chopHardware,
         "hasAxis" to (chopAxis != null),
         "gestures" to Gesture.entries.associate {
             it.key to mapOf("enabled" to isEnabled(it), "action" to actionOf(it).key)
@@ -170,5 +176,6 @@ class EventsPrefs(context: Context) {
         const val KEY_CHOP_THRESHOLD = "chop.threshold"
         const val KEY_POCKET = "chop.pocket_gate"
         const val KEY_AXIS_ONLY = "chop.axis_only"
+        const val KEY_CHOP_HARDWARE = "chop.hardware"
     }
 }

@@ -78,6 +78,7 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     override fun onDestroy() {
         running = false
         Diag.serviceHz = 0
+        Diag.serviceHardwareChop = false
         if (::prefs.isInitialized) prefs.prefs.unregisterOnSharedPreferenceChangeListener(this)
         if (::engine.isInitialized) engine.stop()
         wakeLock?.takeIf { it.isHeld }?.release()
@@ -100,7 +101,8 @@ class EventsService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         engine.configure(Gesture.entries.filter { prefs.isEnabled(it) }.toSet())
 
         // Belt and braces with the wake-up sensors: keep the CPU awake while the screen is off.
-        if (prefs.screenOff) {
+        // Not needed when only sensors that wake the CPU themselves are used (hardware chop, proximity).
+        if (prefs.screenOff && engine.needsCpu) {
             if (wakeLock == null) {
                 wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Flick:sensors").apply {
                     setReferenceCounted(false)

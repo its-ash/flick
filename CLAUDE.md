@@ -49,6 +49,14 @@ low / normal / high scales thresholds ×1.3 / ×1 / ×0.75.
   Recording tool: `tools/sensorrec/` (see its README); `ChopReplayTest` replays a recording
   (`CHOP_REC=/path/rec.csv make test-native`) and prints caught / missed / extra per threshold.
   Pocket gate (proximity near ignores chops) is optional and OFF by default; near = value < min(range, 3).
+- Hardware chop (2026-11-14): on phones with Motorola's `ChopChop Wakeup` sensor (string type
+  `com.motorola.sensor.chopchop`, perm n/a, so any app may register it) the service registers that
+  sensor instead of the 100 Hz linear-acceleration stream. It runs on the sensor hub, fires at
+  about the 3rd swing (vs our detector waiting for the motion end) and wakes the CPU itself, so the
+  service skips the wake lock when no other CPU-bound sensor is needed (`GestureEngine.needsCpu`).
+  Prefs `chop.hardware` (default on), Settings switch only shown when `status().chopSensor`.
+  Sensitivity/Calibrate do not affect it; the Test screen still streams for its meter, and Calibrate
+  uses the software detector. Moto Actions' own Chop must be off or the torch toggles twice.
   Test screen: live motion bar, peak of the last burst vs the trigger line, Diagnostics card
   (`Diag.kt`: service running, background sample rate, torch state, last gesture / action + error).
 - Non-detection fixes (v1.1): old prefs migrated (`prefs_version` 2 drops `calib.*`, `gesture.shake/chop.*`,
@@ -89,7 +97,8 @@ reproduced on hardware (no device here); verified with synthetic traces.
     (`make test-native`). Change thresholds only together with tests.
   - `EventsService.kt`: `specialUse` foreground service. Registers only the
     sensors that enabled gestures need, holds a partial wake lock when "work with
-    the screen off" is on (non-wake-up sensors stop with the CPU otherwise),
+    the screen off" is on and a CPU-bound sensor is registered (non-wake-up sensors stop with the CPU otherwise).
+    No POST_NOTIFICATIONS on purpose: Android 13+ hides its notification from the shade,
     reconfigures on any SharedPreferences change, `START_STICKY`.
   - `ActionRunner.kt`: torch via `CameraManager.setTorchMode`; wake via a
     `SCREEN_BRIGHT | ACQUIRE_CAUSES_WAKEUP` wake lock (`TURN_SCREEN_ON` declared);

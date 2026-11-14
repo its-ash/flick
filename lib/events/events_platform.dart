@@ -23,6 +23,7 @@ class EventsConfig {
     this.chopThreshold = 30,
     this.pocketGate = false,
     this.chopAxisOnly = false,
+    this.chopHardware = true,
     this.hasAxis = false,
   });
 
@@ -37,6 +38,7 @@ class EventsConfig {
       chopThreshold: (map['chopThreshold'] as num?)?.toDouble() ?? 30,
       pocketGate: map['pocketGate'] as bool? ?? false,
       chopAxisOnly: map['chopAxisOnly'] as bool? ?? false,
+      chopHardware: map['chopHardware'] as bool? ?? true,
       hasAxis: map['hasAxis'] as bool? ?? false,
       trained: {
         for (final e in ((map['trained'] as Map<Object?, Object?>?) ?? const {}).entries)
@@ -66,6 +68,9 @@ class EventsConfig {
 
   /// Only accept chops near the direction learned by Calibrate.
   final bool chopAxisOnly;
+
+  /// Use the phone's own chop sensor (Motorola) when it has one.
+  final bool chopHardware;
   final bool hasAxis;
   final Map<GestureKind, GestureSetting> gestures;
 
@@ -90,6 +95,9 @@ class EventsStatus {
   bool get dnd => _b('dnd');
   bool get battery => _b('battery');
   bool get tileSupported => _b('tileSupported');
+
+  /// The phone has Motorola's chop-chop gesture sensor.
+  bool get chopSensor => _b('chopSensor');
   bool has(GestureSensor s) => _b(s.name);
 }
 

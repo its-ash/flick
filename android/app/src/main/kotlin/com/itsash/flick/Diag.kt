@@ -11,6 +11,8 @@ object Diag {
     @Volatile var serviceHz = 0
     @Volatile var serviceSensor = ""
     @Volatile var serviceSampleAt = 0L
+    /** The service gets chops from the phone's own chop sensor (no sample stream to count). */
+    @Volatile var serviceHardwareChop = false
 
     @Volatile var lastGesture = ""
     @Volatile var lastGestureAt = 0L

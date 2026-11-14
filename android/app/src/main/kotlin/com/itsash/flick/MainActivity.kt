@@ -25,7 +25,8 @@ import io.flutter.plugin.common.MethodChannel
  *   - status() -> {overlay, dnd, battery, accelerometer, gyroscope, proximity, tileSupported}
  *   - openPermission({name}): "overlay" | "dnd" | "battery".
  *   - tryAction({action}): runs an action now, for the "Try" buttons; returns an error text or null.
- *   - setOption also takes "chopThreshold" (double, 15-60), "pocketGate" and "chopAxisOnly" (bool).
+ *   - setOption also takes "chopThreshold" (double, 15-60), "pocketGate", "chopAxisOnly" and
+ *     "chopHardware" (bool). status() also has "chopSensor" (phone has Motorola's chop sensor).
  *   - addTile() -> asks Android 13+ to add the Quick Settings tile.
  *   - startTraining({gesture}) / stopTraining() / resetTraining({gesture}): personal strength
  *     (only meaningful while the probe stream below is listened to).
@@ -67,6 +68,7 @@ class MainActivity : FlutterActivity() {
                             }
                             "pocketGate" -> prefs.pocketGate = call.argument<Boolean>("value") ?: false
                             "chopAxisOnly" -> prefs.chopAxisOnly = call.argument<Boolean>("value") ?: false
+                            "chopHardware" -> prefs.chopHardware = call.argument<Boolean>("value") ?: true
                         }
                         result.success(null)
                     }
@@ -135,6 +137,7 @@ class MainActivity : FlutterActivity() {
             "accelerometer" to (sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null),
             "gyroscope" to (sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null),
             "proximity" to (sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY) != null),
+            "chopSensor" to (GestureEngine.hardwareChopSensor(sensors) != null),
             "tileSupported" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU),
         )
     }
