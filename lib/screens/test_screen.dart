@@ -49,6 +49,7 @@ class _TestScreenState extends State<TestScreen> {
   }
 
   void _onEvent(Map<Object?, Object?> e) {
+    if (!mounted) return;
     switch (e['type']) {
       case 'frame':
         setState(() {
@@ -61,8 +62,10 @@ class _TestScreenState extends State<TestScreen> {
           }
         });
       case 'gesture':
-        setState(() => _log.insert(0, e['gesture'] == 'chop' ? 'Chop twice detected' : 'Twist twice detected'));
-        if (_log.length > 5) _log.removeLast();
+        setState(() {
+          _log.insert(0, e['gesture'] == 'chop' ? 'Chop twice detected' : 'Twist twice detected');
+          if (_log.length > 5) _log.removeLast();
+        });
       case 'rep':
         setState(() => _reps = e['n'] as int);
       case 'trained':
@@ -85,6 +88,7 @@ class _TestScreenState extends State<TestScreen> {
 
   Future<void> _cancelTraining() async {
     await store.platform.stopTraining();
+    if (!mounted) return;
     setState(() {
       _training = null;
       _reps = 0;

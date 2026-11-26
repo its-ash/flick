@@ -1,1 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" shape-rendering="crispEdges"><rect width="1024" height="1024" fill="#7C3AED"/><path fill="#FFFFFF" d="M536 200h240v48h-240zM488 248h240v48h-240zM440 296h240v48h-240zM392 344h240v48h-240zM344 392h240v48h-240zM296 440h432v48h-432zM488 488h240v48h-240zM440 536h240v48h-240zM440 584h192v48h-192zM392 632h192v48h-192zM392 680h144v48h-144zM344 728h144v48h-144zM344 776h96v48h-96z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#6D28D9"/><stop offset="100%" stop-color="#3730A3"/></linearGradient>
+  <radialGradient id="topGlow" cx="260" cy="220" r="680" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#C4B5FD" stop-opacity="0.26"/><stop offset="100%" stop-color="#C4B5FD" stop-opacity="0"/></radialGradient>
+  <radialGradient id="botGlow" cx="780" cy="820" r="520" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#818CF8" stop-opacity="0.28"/><stop offset="100%" stop-color="#818CF8" stop-opacity="0"/></radialGradient>
+  <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.22"/></filter><linearGradient id="fg" x1="256" y1="220" x2="768" y2="800" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#FFFFFF"/><stop offset="100%" stop-color="#E0E7FF"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+  <rect width="1024" height="1024" fill="url(#topGlow)"/>
+  <rect width="1024" height="1024" fill="url(#botGlow)"/>
+  <g filter="url(#sh)"><path d="M 261.9 395.4 A 276.0 276.0 0 0 1 583.4 245.4" fill="none" stroke="#A5B4FC" stroke-width="32" stroke-linecap="round"/><path d="M 762.1 628.6 A 276.0 276.0 0 0 1 440.6 778.6" fill="none" stroke="#A5B4FC" stroke-width="32" stroke-linecap="round"/><g transform="rotate(-18 512 512)"><rect x="386" y="280" width="252" height="464" rx="56" fill="url(#fg)"/><rect x="418" y="336" width="188" height="332" rx="28" fill="#4338CA" fill-opacity="0.16"/><rect x="474" y="302" width="76" height="14" rx="7" fill="#6D28D9" fill-opacity="0.45"/><path d="M 526 420 L 466 518 H 516 L 496 602 L 560 496 H 510 Z" fill="#6D28D9"/></g></g>
+</svg>

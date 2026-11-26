@@ -5,10 +5,19 @@ import '../events/events_store.dart';
 import '../events/gesture.dart';
 import 'test_screen.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.store});
 
   final EventsStore store;
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  double? _chopDrag;
+
+  EventsStore get store => widget.store;
 
   @override
   Widget build(BuildContext context) {
@@ -44,13 +53,17 @@ class SettingsScreen extends StatelessWidget {
                       onChanged: (v) => store.setOption('sensitivity', v),
                     ),
                     UiSlider(
-                      value: c.chopThreshold.clamp(15.0, 60.0),
+                      value: (_chopDrag ?? c.chopThreshold).clamp(15.0, 60.0),
                       min: 15,
                       max: 60,
                       divisions: 45,
                       label: 'Chop trigger level (m/s²)',
                       format: (v) => v.toStringAsFixed(1),
-                      onChangeEnd: (v) => store.setOption('chopThreshold', v),
+                      onChanged: (v) => setState(() => _chopDrag = v),
+                      onChangeEnd: (v) async {
+                        await store.setOption('chopThreshold', v);
+                        if (mounted && _chopDrag == v) setState(() => _chopDrag = null);
+                      },
                     ),
                   ],
                 ),
@@ -58,6 +71,7 @@ class SettingsScreen extends StatelessWidget {
               UiListGroup(
                 header: 'Background',
                 footer:
+                    '${s.chopSensor ? "Phone's chop sensor: turn off Chop in Moto Actions so the light does not toggle twice; Sensitivity and Calibrate do not apply. " : ''}'
                     'Android pauses motion sensors when the screen is off. Keeping them awake lets Chop twice and Twist '
                     'work with the screen off, at some battery cost. Pocket gate: Motorola ignores chops while the '
                     'proximity sensor is covered; on some phones that sensor stays covered by mistake, so it is off.',
@@ -65,10 +79,7 @@ class SettingsScreen extends StatelessWidget {
                   if (s.chopSensor)
                     UiSwitchTile(
                       "Use the phone's chop sensor",
-                      subtitle:
-                          'Motorola detects Chop twice on its sensor chip: faster, works with the screen off, '
-                          'no battery cost. Turn off Chop in Moto Actions so the light does not toggle twice. '
-                          'Sensitivity and Calibrate then do not apply.',
+                      subtitle: 'Faster, works with the screen off, no battery cost.',
                       icon: Icons.memory_rounded,
                       value: c.chopHardware,
                       onChanged: (v) => store.setOption('chopHardware', v),

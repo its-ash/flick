@@ -71,10 +71,6 @@ release: $(RELEASE_DEPS)
 	cd $(DIST) && shasum -a 256 $(STORE_ID).apk > $(STORE_ID).apk.sha256
 	git add -A
 	@msg="release: $(TAG)"; \
-	if command -v copilot >/dev/null 2>&1; then \
-		m=$$(copilot -sp 'Analyze the staged git changes and generate a concise commit message. Output ONLY the commit message. Do not execute any commands. Do not include quotes, markdown, explanation, or bullet points.' 2>/dev/null) \
-		&& [ -n "$$m" ] && msg="$$m ($(TAG))"; \
-	fi; \
 	git commit -m "$$msg" || echo "== nothing to commit"
 	git tag -a $(TAG) -m "$(STORE_NAME) $(TAG)"
 	git push origin HEAD
